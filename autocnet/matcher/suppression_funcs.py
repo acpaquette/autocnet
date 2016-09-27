@@ -28,7 +28,8 @@ def error(row, edge):
     in a fundamental matrix as the inverse strength.
     """
     key = row.name
+
     try:
-        return 1 / edge.fundamental_matrix.error.iloc[key]
+        return 1 / edge.fundamental_matrix.error.loc[key]
     except:
         return np.NaN

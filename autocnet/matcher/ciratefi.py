@@ -66,7 +66,6 @@ def cifi(template, search_image, thresh=90, use_percentile=True,
                       parrallel array of best scales for the first grade candidate points
 
     """
-
     # check inputs for validity
     if template.shape > search_image.shape:
         raise ValueError('Template Image is smaller than Search Image for template of'
@@ -533,14 +532,18 @@ def tefi(template, search_image, candidate_pixels, best_scales, best_angles,
 
     candidate_pixels = candidate_pixels/upsampling
 
+    #print(candidate_pixels)
+    #print(tefi_coeffs)
+
     results = candidate_pixels[np.where(tefi_coeffs >= thresh)]
+    strengths = tefi_coeffs[np.where(tefi_coeffs >= thresh)]
 
     if verbose: # pragma: no cover
         plt.imshow(image_pixels, interpolation='none')
         plt.scatter(y=results[:, 0], x=results[:, 1], c='w', s=80)
         plt.show()
 
-    return results
+    return results, strengths
 
 
 def ciratefi(template, search_image, upsampling=1, cifi_thresh=95, rafi_thresh=95, tefi_thresh=100,
@@ -600,7 +603,6 @@ def ciratefi(template, search_image, upsampling=1, cifi_thresh=95, rafi_thresh=9
     results : ndarray
               array of pixel in (y, x)
     """
-
     # Perform first filter cifi
     fg_candidate_pixels, best_scales = cifi(template, search_image, thresh=cifi_thresh,
                                             use_percentile=use_percentile,
@@ -609,13 +611,53 @@ def ciratefi(template, search_image, upsampling=1, cifi_thresh=95, rafi_thresh=9
     sg_candidate_points, best_rotation = rafi(template, search_image, fg_candidate_pixels, best_scales,
                                               thresh=rafi_thresh, use_percentile=use_percentile, alpha=alpha,
                                               radii=radii, verbose=verbose)
-
     # Perform last filter tefi
     results = tefi(template, search_image, sg_candidate_points, best_scales, best_rotation,
                    thresh=tefi_thresh, alpha=math.pi/4, use_percentile=True, upsampling=upsampling, verbose=verbose)
 
     # return the points found
-    return results
+    u_template = zoom(template, upsampling, order=3)
+    u_image = zoom(search_image, upsampling, order=3)
+
+    ideal_y = u_image.shape[0] / 2
+    ideal_x = u_image.shape[1] / 2
+
+    print('Ideal x and y')
+    print(ideal_x)
+    print('\n')
+    print(ideal_y)
+    print('\n')
+
+    y = results[0][0][0] * upsampling
+    x = results[0][0][1] * upsampling
+
+    print('x and y')
+    print(x)
+    print('\n')
+    print(y)
+    print('\n')
+
+    # Compute the shift from template upper left to template center
+    y += (u_template.shape[0] / 2)
+    x += (u_template.shape[1] / 2)
+
+    print('x and y template')
+    print(u_template.shape[1]/2)
+    print('\n')
+    print(u_template.shape[0]/2)
+    print('\n')
+
+    x_offset = (ideal_x - x) / upsampling
+    y_offset = (ideal_y - y) / upsampling
+
+    print('Resulting x and y')
+    print(x_offset)
+    print('\n')
+    print(y_offset)
+    print('\n')
+
+    strength = results[1][0]
+    return x_offset, y_offset, strength
 
 
 def to_polar_coord(shape, center):

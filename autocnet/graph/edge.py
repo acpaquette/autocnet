@@ -8,6 +8,8 @@ from autocnet.matcher import health
 from autocnet.matcher import outlier_detector as od
 from autocnet.matcher import suppression_funcs as spf
 from autocnet.matcher import subpixel as sp
+from autocnet.matcher import ciratefi
+from autocnet.matcher import naive_template
 from autocnet.matcher.feature import FlannMatcher
 from autocnet.transformation.transformations import FundamentalMatrix, Homography
 from autocnet.vis.graph_view import plot_edge
@@ -245,7 +247,7 @@ class Edge(dict, MutableMapping):
         # Finalize the array to get custom attrs to propagate
         self.homography.__array_finalize__(self.homography)
 
-    def subpixel_register(self, clean_keys=[], threshold=0.8,
+    def subpixel_register(self, func='naive_template', clean_keys=[], threshold=0.8,
                           template_size=19, search_size=53, max_x_shift=1.0,
                           max_y_shift=1.0, tiled=False, **kwargs):
         """
@@ -280,12 +282,14 @@ class Edge(dict, MutableMapping):
         max_y_shift : float
                       The maximum (positive) value that a pixel can shift in the y direction
                       without being considered an outlier
+
+        func : string
+               String representation of the subpixel registration function to use
         """
         matches = self.matches
         for column, default in {'x_offset': 0, 'y_offset': 0, 'correlation': 0, 'reference': -1}.items():
             if column not in self.matches.columns:
                 self.matches[column] = default
-
         # Build up a composite mask from all of the user specified masks
         matches, mask = self._clean(clean_keys)
 
@@ -311,7 +315,9 @@ class Edge(dict, MutableMapping):
             s_template = sp.clip_roi(s_img, s_keypoint, template_size)
             d_search = sp.clip_roi(d_img, d_keypoint, search_size)
             try:
-                x_offset, y_offset, strength = sp.subpixel_offset(s_template, d_search, **kwargs)
+                x_offset, y_offset, strength = sp.subpixel_offset(func, s_template, d_search, **kwargs)
+                print(x_offset, y_offset, strength)
+                print("\n")
                 self.matches.loc[idx, ('x_offset', 'y_offset',
                                        'correlation', 'reference')] = [x_offset, y_offset, strength, source_image]
             except:
@@ -363,6 +369,7 @@ class Edge(dict, MutableMapping):
         # Massage the dataframe into the correct structure
         coords = self.source.get_keypoint_coordinates()
         merged = matches.merge(coords, left_on=['source_idx'], right_index=True)
+        print(merged)
         merged['strength'] = merged.apply(suppression_func, axis=1, args=([self]))
 
         if not hasattr(self, 'suppression'):

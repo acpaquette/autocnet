@@ -61,11 +61,35 @@ def pattern_match(template, image, upsampling=16, func=cv2.TM_CCOEFF_NORMED, err
     ideal_y = u_image.shape[0] / 2
     ideal_x = u_image.shape[1] / 2
 
+    print('Ideal x and y')
+    print(ideal_x)
+    print('\n')
+    print(ideal_y)
+    print('\n')
+
+    print('Default x and y')
+    print(x)
+    print('\n')
+    print(y)
+    print('\n')
+
     # Compute the shift from template upper left to template center
     y += (u_template.shape[0] / 2)
     x += (u_template.shape[1] / 2)
 
+    print('x and y template')
+    print(u_template.shape[1]/2)
+    print('\n')
+    print(u_template.shape[0]/2)
+    print('\n')
+
     x = (ideal_x - x) / upsampling
     y = (ideal_y - y) / upsampling
+
+    print('Resulting x and y')
+    print(x)
+    print('\n')
+    print(y)
+    print('\n')
     return x, y, max_corr
 

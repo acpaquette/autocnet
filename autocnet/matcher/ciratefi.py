@@ -547,7 +547,7 @@ def tefi(template, search_image, candidate_pixels, best_scales, best_angles,
 
 
 def ciratefi(template, search_image, upsampling=1, cifi_thresh=95, rafi_thresh=95, tefi_thresh=100,
-             use_percentile=False, alpha=math.pi/16, scales=[0.5, 0.57, 0.66,  0.76, 0.87, 1.0],
+             use_percentile=True, alpha=math.pi/16, scales=[0.5, 0.57, 0.66,  0.76, 0.87, 1.0],
              radii=list(range(1, 12)), verbose=False):
     """
     Parameters

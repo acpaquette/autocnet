@@ -8,6 +8,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import Polygon
 
 
 from autocnet.examples import get_path
@@ -25,6 +26,11 @@ class TestNode(object):
         img = get_path('AS15-M-0295_SML.png')
         return node.Node(image_name='AS15-M-0295_SML',
                               image_path=img)
+
+    @pytest.fixture
+    def geo_node(self):
+        img = get_path('AS15-M-0297_crop.cub')
+        return node.Node(image_name='AS15-M-0297_crop.cub', image_path=img)
 
     def test_get_handle(self, node):
         assert isinstance(node.geodata, GeoDataset)
@@ -125,3 +131,8 @@ class TestNode(object):
                                    columns=['a', 'b'])
         matches, mask = node._clean(clean_keys=['a'])
         assert mask.equals(pd.Series([True, True, True, False, False]))
+
+    def test_footprint(self, geo_node):
+        # Esnure that a shapely compliant poly is being returned
+        assert isinstance(geo_node.footprint, Polygon)
+        

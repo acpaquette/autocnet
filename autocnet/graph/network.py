@@ -1,3 +1,4 @@
+from collections import defaultdict
 import itertools
 import math
 import os
@@ -213,6 +214,49 @@ class CandidateGraph(nx.Graph):
 
         """
         return self.node[node_index]['image_name']
+
+    def get_matches(self, clean_keys=[]):
+        """
+        For each edge get all valid matches, masked by the clean_keys.
+
+        Parameters
+        ----------
+        clean_keys: list
+                    of masks to use
+
+        Returns
+        -------
+        matches : list
+                  of matches dataframes
+        """
+        matches = []
+        for s, d, e in self.edges_iter(data=True):
+            match, _ = e.clean(clean_keys=clean_keys)
+            match = match[['source_image', 'source_idx',
+                           'destination_image', 'destination_idx']]
+            skps = e.get_keypoints('source', index=match.source_idx)
+            skps.columns = ['source_x', 'source_y']
+            dkps = e.get_keypoints('destination', index=match.destination_idx)
+            dkps.columns = ['destination_x', 'destination_y']
+            match = match.join(skps, on='source_idx')
+            match = match.join(dkps, on='destination_idx')
+            matches.append(match)
+        return matches
+
+    def get_matches(self, clean_keys=[]):
+        matches = []
+        for s, d, e in self.edges_iter(data=True):
+            match, _ = e.clean(clean_keys=clean_keys)
+            match = match[['source_image', 'source_idx',
+                           'destination_image', 'destination_idx']]
+            skps = e.get_keypoints('source', index=match.source_idx)
+            skps.columns = ['source_x', 'source_y']
+            dkps = e.get_keypoints('destination', index=match.destination_idx)
+            dkps.columns = ['destination_x', 'destination_y']
+            match = match.join(skps, on='source_idx')
+            match = match.join(dkps, on='destination_idx')
+            matches.append(match)
+        return matches
 
     def add_image(self, *args, **kwargs):
         """
@@ -520,24 +564,20 @@ class CandidateGraph(nx.Graph):
             filelist.append(node['image_path'])
         return filelist
 
-    def generate_cnet(self, *args, deepen=False, **kwargs):
+    def generate_control_network(self, clean_keys=['fundamental']):
         """
-        Compute (or re-compute) a CorrespondenceNetwork attribute
+        Generate a correspondence graph from the current candidate graph object.
+        The control network is a single graph object, composed of n-sub graphs,
+        where each sub-graph is the aggregation of all assocaited correspondences.
 
         Parameters
         ----------
-        deepen : bool
-                 Whether or not to attempt to punch through correspondences.  Default: False
-
-        See Also
-        --------
-        autocnet.graph.node.Node
+        clean_keys : list
+                     of strings used to mask the matches on each edge of the
+                     Candidate Graph object
 
         """
-        for i, n in self.nodes_iter(data=True):
-            n.group_correspondences(self, *args, deepen=deepen, **kwargs)
-        self.cn = [n.point_to_correspondence_df for i, n in self.nodes_iter(data=True) if
-                   isinstance(n.point_to_correspondence_df, pd.DataFrame)]
+        return generate_control_network(self)
 
     def island_nodes(self):
         """
@@ -815,6 +855,32 @@ class CandidateGraph(nx.Graph):
 
             edge['weights']['voronoi'] = voronoi_df
 
+    def compute_fully_connected_components(self):
+        """
+        For a given graph, compute all of the fully connected subgraphs with
+        3+ components.
+
+        Returns
+        -------
+        fc : list
+             of lists of node identifiers
+
+        Examples
+        --------
+        >>> G = CandidateGraph()
+        >>> G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
+        >>> fc = G.fully_connected()
+        >>> fc['A']
+        [['C', 'B', 'A'], ['A', 'F', 'E']]
+        """
+        fully_connected = [i for i in nx.enumerate_all_cliques(self) if len(i) > 2]
+        fc = defaultdict(list)
+        for i in fully_connected:
+            for j in i:
+                fc[j].append(tuple(i))
+        return fc
+
+
     def compute_intersection(self, source, clean_keys=[]):
         """
         Computes the intercetion of all images in a graph
@@ -886,3 +952,7 @@ class CandidateGraph(nx.Graph):
                 return False
 
         return True
+
+    def footprints(self):
+        geoms = [n.footprint for i, n in self.nodes_iter(data=True)]
+        return gpd.GeoDataFrame(geometry=geoms)

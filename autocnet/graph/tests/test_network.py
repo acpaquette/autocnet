@@ -5,13 +5,12 @@ import sys
 import pytest
 import unittest
 
-from unittest.mock import patch
-from unittest.mock import PropertyMock
-from osgeo import ogr
-from unittest.mock import MagicMock
-from plio.io import io_gdal
+from unittest.mock import patch, PropertyMock, MagicMock
 
+import geopandas as gpd
 import numpy as np
+from osgeo import ogr
+from plio.io import io_gdal
 
 from autocnet.examples import get_path
 
@@ -26,6 +25,17 @@ def graph():
     basepath = get_path('Apollo15')
     return network.CandidateGraph.from_adjacency(get_path('three_image_adjacency.json'),
                                                       basepath=basepath)
+
+@pytest.fixture()
+def geo_graph():
+    basepath = get_path('Apollo15')
+    a = 'AS15-M-0297_crop.cub'
+    b = 'AS15-M-0298_crop.cub'
+    c = 'AS15-M-0299_crop.cub'
+    adjacency = {a:[b,c],
+                 b:[a,c],
+                 c:[a,b]}
+    return network.CandidateGraph.from_adjacency(adjacency, basepath=basepath)
 
 @pytest.fixture()
 def disconnected_graph():
@@ -247,3 +257,7 @@ def test_is_complete(graph):
 
     assert False == incomplete_graph.is_complete()
     assert True == graph.is_complete()
+
+def test_footprints(geo_graph):
+    # This is just testing the interface - should get a geodataframe back
+    assert isinstance(geo_graph.footprints(), gpd.GeoDataFrame)

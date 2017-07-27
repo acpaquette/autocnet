@@ -13,7 +13,7 @@ except:  # pragma: no cover
     cv_avail = False
 
 
-def compute_reprojection_error(F, x, x1):
+def compute_reprojection_error(F, x, x1, index=None):
     """
     Given a set of matches and a known fundamental matrix,
     compute distance between match points and the associated
@@ -45,7 +45,22 @@ def compute_reprojection_error(F, x, x1):
     if x1.shape[1] != 3:
         x1 = make_homogeneous(x1)
 
+    x = x.values
+    x1 = x1.values
+
     # Normalize the vector
+    l1 = normalize_vector(F.dot(x.T))
+    l2 = normalize_vector(F.T.dot(x1.T))
+
+    dist1 = np.sum(x1.T.conj() * l1, axis=0)
+    dist2 = np.sum(l2.conj() * x.T, axis=0)
+    F_error = np.sqrt(dist1**2 + dist2**2)
+
+    if index:
+        F_error = pd.Series(F_error, index=index)
+
+    return F_error
+
     l_norms = normalize_vector(x.dot(F.T))
     F_error = np.abs(np.sum(l_norms * x1, axis=1))
 
@@ -169,7 +184,7 @@ def enforce_singularity_constraint(F):
     return F
 
 def compute_fundamental_matrix(kp1, kp2, method='mle', reproj_threshold=2.0,
-                               confidence=0.99):
+                               confidence=0.99, mle_reproj_threshold=0.5):
     """
     Given two arrays of keypoints compute the fundamental matrix.  This function
     accepts two dataframe of keypoints that have
@@ -265,7 +280,7 @@ def compute_fundamental_matrix(kp1, kp2, method='mle', reproj_threshold=2.0,
         F = gold_standard_f
 
         mask = update_fundamental_mask(F, kp1, kp2,
-                                       threshold=reproj_threshold).values
+                                       threshold=mle_reproj_threshold).values
 
 
     return F, mask

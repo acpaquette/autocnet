@@ -50,11 +50,8 @@ def normalize_vector(line):
     """
     if isinstance(line, pd.DataFrame):
         line = line.values
-    try:
-        n = np.sqrt(line[:, 0]**2 + line[:, 1]**2).reshape(-1, 1)
-    except:
-        n = np.sqrt(line[0]**2 + line[1]**2)
-    line = line / n
+    n = line[0]**2 + line[1]**2 + line[2]**2
+    line /= np.sqrt(n)
     return line
 
 

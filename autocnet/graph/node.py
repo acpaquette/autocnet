@@ -9,9 +9,9 @@ from plio.io.io_gdal import GeoDataset
 from plio.io.isis_serial_number import generate_serial_number
 from scipy.misc import bytescale, imresize
 from shapely.geometry import Polygon
+from shapely import wkt
 
 from autocnet.cg import cg
-from autocnet.control.control import Correspondence, Point
 
 from autocnet.io import keypoints as io_keypoints
 
@@ -83,6 +83,32 @@ class Node(dict, MutableMapping):
         """.format(self['node_id'], self['image_name'], self['image_path'],
                    self.nkeypoints, self.masks, self.__class__)
 
+    def __hash__(self):
+        return hash(repr(self))
+
+    def __gt__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid > oid
+
+    def __geq__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid >= oid
+
+    def __lt__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid < oid
+
+    def __leq__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid <= oid
+
+    def __str__(self):
+        return str(self['node_id'])
+
     def __eq__(self, other):
         eq = True
         d = self.__dict__
@@ -145,6 +171,16 @@ class Node(dict, MutableMapping):
         boolean_mask = v[1]
         self.masks[column_name] = boolean_mask
     """
+
+    @property
+    def footprint(self):
+        if not getattr(self, '_footprint', None):
+            try:
+                self._footprint = wkt.loads(self.geodata.footprint.GetGeometryRef(0).ExportToWkt())
+            except:
+                return None
+        return self._footprint
+
     @property
     def isis_serial(self):
         """
@@ -261,6 +297,15 @@ class Node(dict, MutableMapping):
             keypoints['homogeneous'] = 1
 
         return keypoints
+
+    def get_raw_keypoint_coordinates(self, index):
+        """
+        The performance of get_keypoint_coordinates can be slow
+        due to the ability for fancier indexing.  This method
+        returns coordinates using numpy array accessors.
+        """
+        index = index.astype(np.int)
+        return self._keypoints.values[index,:2]
 
     @staticmethod
     def _extract_features(array, *args, **kwargs):
@@ -415,7 +460,6 @@ class Node(dict, MutableMapping):
 
         io_keypoints.to_npy(self.keypoints, self.descriptors,
                             out_path)
-
 
     def group_correspondences(self, cg, *args, deepen=False, **kwargs):
         """

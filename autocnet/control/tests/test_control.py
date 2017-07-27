@@ -1,12 +1,13 @@
 import os
 import sys
+import itertools
+
 from time import gmtime, strftime
-import unittest
+
+import pytest
 
 from unittest.mock import Mock, MagicMock
 
-from autocnet.graph.edge import Edge
-from autocnet.graph.node import Node
 
 import numpy as np
 import pandas as pd
@@ -16,82 +17,89 @@ sys.path.insert(0, os.path.abspath('..'))
 from autocnet.control import control
 
 
-class TestC(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        npts = 10
-        coords = pd.DataFrame(np.arange(npts * 2).reshape(-1, 2))
-        source = np.zeros(npts)
-        destination = np.ones(npts)
-        pid = np.arange(npts)
+@pytest.fixture
+def candidategraph():
+    edges = [(0,1), (0,2), (1,2)]
 
-        matches = pd.DataFrame(np.vstack((source, pid, destination, pid)).T, columns=['source_image',
-                                                                                      'source_idx',
-                                                                                      'destination_image',
-                                                                                      'destination_idx'])
+    matches = []
+    e = edges[0]
+    source_image = np.repeat(e[0], 8)
+    destin_image = np.repeat(e[1], 8)
+    data = np.vstack((source_image, [0,1,2,3,4,5,6,7], destin_image, [0,1,2,3,4,5,6,7])).T
+    matches_df = pd.DataFrame(data, columns=['source_image', 'source_idx', 'destination_image', 'destination_idx'])
+    matches.append(matches_df)
 
-        edge = Mock(spec=Edge)
-        edge.source = Mock(spec=Node)
-        edge.destination = Mock(spec=Node)
-        edge.source.isis_serial = None
-        edge.destination.isis_serial = None
-        edge.source.get_keypoint_coordinates = MagicMock(return_value=coords)
-        edge.destination.get_keypoint_coordinates = MagicMock(return_value=coords)
+    e = edges[1]
+    c1 = [0,1,2,3,4,5,8,9]
+    c2 = [0,1,2,3,4,5,8,9]
+    source_image = np.repeat(e[0], 8)
+    destin_image = np.repeat(e[1], 8)
+    data = np.vstack((source_image, c1, destin_image, c2)).T
+    matches_df = pd.DataFrame(data, columns=['source_image', 'source_idx', 'destination_image', 'destination_idx'])
+    matches.append(matches_df)
 
-        cls.C = control.CorrespondenceNetwork()
-        cls.C.add_correspondences(edge, matches)
+    e = edges[2]
+    c1 = [0,1,2,3,4,5,8,9]
+    c2 = [0,1,2,3,4,5,6,7]
+    source_image = np.repeat(e[0], 8)
+    destin_image = np.repeat(e[1], 8)
+    data = np.vstack((source_image, c1, destin_image, c2)).T
+    matches_df = pd.DataFrame(data, columns=['source_image', 'source_idx', 'destination_image', 'destination_idx'])
+    matches.append(matches_df)
+
+    # Mock in the candidate graph
+    cg = MagicMock()
+    cg.get_matches = MagicMock(return_value=matches)
+
+    return cg
+
+@pytest.fixture()
+def controlnetwork(candidategraph):
+    cn =  control.ControlNetwork()
+    cn.add_from_matches(candidategraph.get_matches())
+    return cn
+
+class TestControlMediator():
+
+    def test_fromcandidategraph(self, candidategraph):
+        cm = control.ControlMediator.from_candidategraph(candidategraph)
+        test_image_ids(cm._cn)
+        test_data_exists(cm._cn)
 
 
-    def test_n_point(self):
-        self.assertEqual(self.C.n_points, 10)
 
-    def test_n_measures(self):
-        self.assertEqual(self.C.n_measures, 20)
 
-    def test_modified_date(self):
-        self.assertIsInstance(self.C.modifieddate, str)
+# Test the Control Object Independent of any Candidate Graph
+def test_instantiate(candidategraph):
+    cn = control.ControlNetwork()
+    cn.add_from_matches(candidategraph.get_matches())
+    assert isinstance(cn.data, pd.DataFrame)
 
-    def test_creation_date(self):
-        self.assertEqual(self.C.creationdate, strftime("%Y-%m-%d %H:%M:%S", gmtime()))
+def test_data_exists(controlnetwork):
+    pt_counts = controlnetwork.data.groupby('point_id').count()
+    # Ensure 6 points with 3 measures
+    assert len(pt_counts.query('image_index == 3').image_index) == 6
 
-    def test_point_subpixel(self):
-        for k, v in self.C.point_to_correspondence.items():
-            self.assertFalse(k.subpixel)
-            k.subpixel = True
-            self.assertTrue(k.subpixel)
-            break
+    # Ensure 6 points with 2 measures
+    assert len(pt_counts.query('image_index == 2').image_index) == 6
 
-    def test_equalities(self):
-        points = []
-        correspondences = []
-        for k, v in self.C.point_to_correspondence.items():
-            points.append(k)
-            correspondences.extend(v)
-        self.assertEqual(points[0], points[0])
-        self.assertNotEqual(points[-1], points[1])
-        self.assertEqual(correspondences[1][0], correspondences[1][0])
+    # Ensure that the measure to point lookup is correct
+    assert len(controlnetwork.measure_to_point.keys()) == 30
 
-    def test_to_dataframe(self):
-        self.C.to_dataframe()
+def test_add_measure(controlnetwork):
+    assert False
 
-    def test_point_repr(self):
-        expected = 0
-        p = control.Point(expected)
-        self.assertEqual(str(expected), p.__repr__())
+def test_image_ids(controlnetwork):
+    iids = controlnetwork.get_image_ids()
+    truth = np.array([0., 1. , 2.])
+    np.testing.assert_array_equal(iids, truth)
 
-    def test_correspondence_repr(self):
-        expected = 0
-        c = control.Correspondence(expected, 1, 1)
-        self.assertEqual(str(expected), c.__repr__())
+def test_find_measure_from_points(controlnetwork):
+    measures = controlnetwork.data.query('point_id == 3')
+    assert len(measures) == 3
+    np.testing.assert_array_equal(measures.image_index.unique(), np.array([0,1,2]))
+    assert len(measures.keypoint_index.unique()) == 1
 
-    def test_correspondence_eq(self):
-        expected = 0
-        c = control.Correspondence(expected, 1, 1)
-        self.assertTrue(c == expected)
-
-    def test_correspondence_hash(self):
-        expected = 200
-        c = control.Correspondence(expected, 1, 1)
-        self.assertEqual(hash(expected), hash(c))
-
+def test_find_controlpoint_from_measure(controlnetwork):
+    assert False

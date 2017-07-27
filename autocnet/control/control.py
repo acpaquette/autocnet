@@ -23,7 +23,6 @@ class ControlMediator(object):
     def from_candidategraph(cls, candidategraph, clean_keys=[]):
         mediator = cls(candidategraph, ControlNetwork())
         matches = candidategraph.get_matches(clean_keys=clean_keys)
-        print(matches)
         for match in matches:
             for idx, row in match.iterrows():
                 edge = (row.source_image, row.destination_image)
@@ -33,10 +32,10 @@ class ControlMediator(object):
                 destin_fields = row[['destination_x', 'destination_y']]
                 if mediator._cn.measure_to_point.get(source_key, None) is not None:
                     tempid = mediator._cn.measure_to_point[source_key]
-                    mediator._cn.add_measure(destin_key, edge, row.name, source_fields, point_id=tempid)
+                    mediator._cn.add_measure(destin_key, edge, row.name, destin_fields, point_id=tempid)
                 elif mediator._cn.measure_to_point.get(destin_key, None) is not None:
                     tempid = mediator._cn.measure_to_point[destin_key]
-                    mediator._cn.add_measure(source_key, edge, row.name,  destin_fields, point_id=tempid)
+                    mediator._cn.add_measure(source_key, edge, row.name,  source_fields, point_id=tempid)
                 else:
                     mediator._cn.add_measure(source_key, edge, row.name,  source_fields)
                     mediator._cn.add_measure(destin_key, edge,row.name,  destin_fields)
@@ -167,27 +166,6 @@ class ControlNetwork(object):
         self._measure_id = 0
         self.measure_to_point = {}
         self.data = pd.DataFrame(columns=self.measures_keys)
-
-    def add_from_matches(self, matches):
-        for match in matches:
-            for idx, row in match.iterrows():
-                edge = (row.source_image, row.destination_image)
-                source_key = (row.source_image, row.source_idx)
-                source_fields = row[['source_x', 'source_y']]
-                destin_key = (row.destination_image, row.destination_idx)
-                destin_fields = row[['destination_x', 'destination_y']]
-                if self.measure_to_point.get(source_key, None) is not None:
-                    tempid = self.measure_to_point[source_key]
-                    self.add_measure(destin_key, edge, row.name, source_fields, point_id=tempid)
-                elif self.measure_to_point.get(destin_key, None) is not None:
-                    tempid = self.measure_to_point[destin_key]
-                    self.add_measure(source_key, edge, row.name,  destin_fields, point_id=tempid)
-                else:
-                    self.add_measure(source_key, edge, row.name,  source_fields)
-                    self.add_measure(destin_key, edge,row.name,  destin_fields)
-                    self._point_id += 1
-
-        self.data.index.name = 'measure_id'
 
     def add_measure(self, key, edge, match_idx, fields, point_id=None):
         """

@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import OrderedDict
 import itertools
 import math
 import os
@@ -23,6 +23,7 @@ from autocnet.graph.edge import Edge
 from autocnet.graph.node import Node
 from autocnet.io import network as io_network
 from autocnet.vis.graph_view import plot_graph, cluster_plot
+
 
 # The total number of pixels squared that can fit into the keys number of GB of RAM for SIFT.
 MAXSIZE = {0:None,
@@ -55,6 +56,7 @@ class CandidateGraph(nx.Graph):
     edge_attr_dict_factory = Edge
 
     def __init__(self, *args, basepath=None, **kwargs):
+        # self.edge_attr_dict_factory = decorate_class(Edge, create_cg_updater(self), exclude=['clean', 'get_keypoints'])
         super(CandidateGraph, self).__init__(*args, **kwargs)
         self.graph['node_counter'] = 0
         node_labels = {}
@@ -84,6 +86,9 @@ class CandidateGraph(nx.Graph):
         self.graph['creationdate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
         self.graph['modifieddate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
 
+    def get_matches(self, clean_keys=[], edges=[]):
+        return self.apply_func_to_edges('get_matches')
+
     def __eq__(self, other):
         eq = True
         # Check the nodes
@@ -94,6 +99,9 @@ class CandidateGraph(nx.Graph):
             if not self.edge[s][d] == other.edge[s][d]:
                 eq = False
         return eq
+
+    def _order_adjacency(self):  # pragma: no cover
+        self.adj = OrderedDict(sorted(self.adj.items()))
 
     @property
     def maxsize(self):
@@ -215,49 +223,6 @@ class CandidateGraph(nx.Graph):
         """
         return self.node[node_index]['image_name']
 
-    def get_matches(self, clean_keys=[]):
-        """
-        For each edge get all valid matches, masked by the clean_keys.
-
-        Parameters
-        ----------
-        clean_keys: list
-                    of masks to use
-
-        Returns
-        -------
-        matches : list
-                  of matches dataframes
-        """
-        matches = []
-        for s, d, e in self.edges_iter(data=True):
-            match, _ = e.clean(clean_keys=clean_keys)
-            match = match[['source_image', 'source_idx',
-                           'destination_image', 'destination_idx']]
-            skps = e.get_keypoints('source', index=match.source_idx)
-            skps.columns = ['source_x', 'source_y']
-            dkps = e.get_keypoints('destination', index=match.destination_idx)
-            dkps.columns = ['destination_x', 'destination_y']
-            match = match.join(skps, on='source_idx')
-            match = match.join(dkps, on='destination_idx')
-            matches.append(match)
-        return matches
-
-    def get_matches(self, clean_keys=[]):
-        matches = []
-        for s, d, e in self.edges_iter(data=True):
-            match, _ = e.clean(clean_keys=clean_keys)
-            match = match[['source_image', 'source_idx',
-                           'destination_image', 'destination_idx']]
-            skps = e.get_keypoints('source', index=match.source_idx)
-            skps.columns = ['source_x', 'source_y']
-            dkps = e.get_keypoints('destination', index=match.destination_idx)
-            dkps.columns = ['destination_x', 'destination_y']
-            match = match.join(skps, on='source_idx')
-            match = match.join(dkps, on='destination_idx')
-            matches.append(match)
-        return matches
-
     def add_image(self, *args, **kwargs):
         """
         Adds an image node to the graph.
@@ -266,8 +231,8 @@ class CandidateGraph(nx.Graph):
         ----------
 
         """
-
         raise NotImplementedError
+        self._order_adjacency()
 
     def extract_features(self, band=1, *args, **kwargs):  # pragma: no cover
         """
@@ -459,7 +424,8 @@ class CandidateGraph(nx.Graph):
         graph_mask_keys : list
                           of keys in graph_masks
         """
-        if not isinstance(function, str):
+        return_lis = []
+        if callable(function):
             function = function.__name__
 
         for s, d, edge in self.edges_iter(data=True):
@@ -468,7 +434,58 @@ class CandidateGraph(nx.Graph):
             except:
                 raise AttributeError(function, ' is not an attribute of Edge')
             else:
-                func(*args, **kwargs)
+                ret = func(*args, **kwargs)
+                return_lis.append(ret)
+
+        if any(return_lis):
+            return return_lis
+
+
+    def apply(self, function, on='edge',out=None, args=(), **kwargs):
+        """
+        Applys a function to every node or edge, returns collected return
+        values.
+
+        TODO: Merge with apply_func_to_edges?
+
+        Parameters
+        ----------
+        function : callable
+                   Function to apply to graph. Should accept (id, data).
+
+        on : string
+             Whether to use nodes or edges. default is 'edge'.
+
+        out : var
+              Optionally put the output in a variable rather than returning it
+
+        args : iterable
+               Some iterable of positional arguments for function.
+
+        kwargs : dict
+                 keyword args to pass into function.
+        """
+        options = {
+            'edge' : self.edges_iter,
+            'edges' : self.edges_iter,
+            'e' : self.edges_iter,
+            0 : self.edges_iter,
+            'node' : self.nodes_iter,
+            'nodes' : self.nodes_iter,
+            'n' : self.nodes_iter,
+            1 : self.nodes_iter
+        }
+
+        if not callable(function):
+            raise TypeError('{} is not callable.'.format(function))
+
+        res = []
+        for elem in options[on](data=True):
+            res.append(function(elem, *args, **kwargs))
+
+        if out: out=res
+        else: return res
+
 
     def symmetry_checks(self):
         '''
@@ -564,20 +581,24 @@ class CandidateGraph(nx.Graph):
             filelist.append(node['image_path'])
         return filelist
 
-    def generate_control_network(self, clean_keys=['fundamental']):
+    def generate_cnet(self, *args, deepen=False, **kwargs):
         """
-        Generate a correspondence graph from the current candidate graph object.
-        The control network is a single graph object, composed of n-sub graphs,
-        where each sub-graph is the aggregation of all assocaited correspondences.
+        Compute (or re-compute) a CorrespondenceNetwork attribute
 
         Parameters
         ----------
-        clean_keys : list
-                     of strings used to mask the matches on each edge of the
-                     Candidate Graph object
+        deepen : bool
+                 Whether or not to attempt to punch through correspondences.  Default: False
+
+        See Also
+        --------
+        autocnet.graph.node.Node
 
         """
-        return generate_control_network(self)
+        for i, n in self.nodes_iter(data=True):
+            n.group_correspondences(self, *args, deepen=deepen, **kwargs)
+        self.cn = [n.point_to_correspondence_df for i, n in self.nodes_iter(data=True) if
+                   isinstance(n.point_to_correspondence_df, pd.DataFrame)]
 
     def island_nodes(self):
         """
@@ -747,6 +768,36 @@ class CandidateGraph(nx.Graph):
         H.graph = self.graph
         return H
 
+    # def nodes_iter(self, data=False):
+    #     s = super(CandidateGraph, self)
+    #     nodes = s.nodes_iter(data)
+    #     ret = []
+    #     for n in nodes:
+    #         if data:
+    #             if n[0] in self.nodemask:
+    #                 ret.append(n)
+    #         else:
+    #             if n in self.nodemask:
+    #                 ret.append(n)
+    #     return iter(ret)
+
+    # def edges_iter(self, nbunch=[], data=False, key=False):
+    #     s = super(CandidateGraph, self)
+    #     if not isinstance(nbunch, list):
+    #         nbunch = [nbunch]
+    #
+    #     if nbunch:
+    #         nbunch = [node for node in nbunch if nbunch not in list(self.nodemask)]
+    #     else:
+    #         nbunch = list(self.nodemask)
+    #
+    #     try:
+    #         return s.edges_iter(nbunch=nbunch, data=data)
+    #     except:
+    #         return s.edges_iter([self.node[node]['image_path'] for node in nbunch], data=data)
+
+
+
     def subgraph_from_matches(self):
         """
         Returns a sub-graph where all edges have matches.
@@ -854,32 +905,6 @@ class CandidateGraph(nx.Graph):
             voronoi_df = compute_voronoi(kps[initial_mask][kps_mask], reproj_geom, **kwargs)
 
             edge['weights']['voronoi'] = voronoi_df
-
-    def compute_fully_connected_components(self):
-        """
-        For a given graph, compute all of the fully connected subgraphs with
-        3+ components.
-
-        Returns
-        -------
-        fc : list
-             of lists of node identifiers
-
-        Examples
-        --------
-        >>> G = CandidateGraph()
-        >>> G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
-        >>> fc = G.fully_connected()
-        >>> fc['A']
-        [['C', 'B', 'A'], ['A', 'F', 'E']]
-        """
-        fully_connected = [i for i in nx.enumerate_all_cliques(self) if len(i) > 2]
-        fc = defaultdict(list)
-        for i in fully_connected:
-            for j in i:
-                fc[j].append(tuple(i))
-        return fc
-
 
     def compute_intersection(self, source, clean_keys=[]):
         """

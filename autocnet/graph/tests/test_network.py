@@ -257,6 +257,21 @@ def test_is_complete(graph):
 
     assert False == incomplete_graph.is_complete()
     assert True == graph.is_complete()
+    
+def test_apply(graph):
+    def set_matches(x):
+        s,d,e = x
+        e.matches = ['fake', 'fake', 'fake']
+
+    def get_matches(x):
+        s,d,e = x
+        return e.matches
+
+    graph.apply(set_matches)
+    results = graph.apply(get_matches)
+
+    for matches in results:
+        assert len(matches) == 3
 
 def test_footprints(geo_graph):
     # This is just testing the interface - should get a geodataframe back

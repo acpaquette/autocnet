@@ -39,7 +39,6 @@ def setup_package():
             'pandas',
             'pyyaml',
             'plio',
-            'cyvlfeat',
             'pillow',
             'pysal',
             'scipy',

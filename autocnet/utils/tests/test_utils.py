@@ -159,3 +159,38 @@ class TestUtils(unittest.TestCase):
         patchwork = Patchwork(a=1, b=2, c=3)
         self.assertEqual(patchwork.get(['a', 'b']), [1, 2])
         self.assertEqual(patchwork.get('c'), 3)
+
+    def test_decorate_class(self):
+        class Test(object):
+            def __init__(self):
+                self.test = 'original'
+
+            def get_test(self):
+                return self.test
+
+        def dec(func):
+            return lambda x:'decorated'
+
+        Dec_Test = utils.decorate_class(Test, dec)
+
+        undecorated = Test()
+        decorated = Dec_Test()
+
+        self.assertEqual(undecorated.get_test(), 'original')
+        self.assertEqual(decorated.get_test(), 'decorated')
+
+        with self.assertRaises(Exception):
+            utils.decorate_class(Test, 'Totally not a callable')
+
+    def test_generate_decorator(self):
+        def func_to_wrap(x):
+            return x+1
+
+        def wrapper():
+            # Should be able to access run-time namespace
+            return ret + 1, test
+
+        decorator = utils.create_decorator(wrapper, test=0)
+        wrapped_func = decorator(func_to_wrap)
+
+        self.assertTrue(wrapped_func(1),2)

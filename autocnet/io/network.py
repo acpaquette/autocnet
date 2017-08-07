@@ -126,4 +126,6 @@ def load(projectname):
                 pass
             # Add a mock edge
             cg.edge[e['source']][e['target']] = edge
+
+            cg._order_adjacency()
     return cg

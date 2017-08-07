@@ -87,10 +87,6 @@ class TestTwoImageMatching(unittest.TestCase):
         filelist = cg.to_filelist()
         write_filelist(filelist, path="fromlis.lis")
 
-        # Step: Output a control network
-        to_isis('TestTwoImageMatching.net', cg.cn, mode='wb',
-                networkid='TestTwoImageMatching', targetname='Moon')
-
     def tearDown(self):
         try:
             os.remove('TestTwoImageMatching.net')

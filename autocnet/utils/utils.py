@@ -363,3 +363,56 @@ def methodispatch(func):
     wrapper.register = dispatcher.register
     update_wrapper(wrapper, dispatcher)
     return wrapper
+
+
+def decorate_class(cls, decorator, exclude=[], *args, **kwargs): # pragma: no cover
+    """
+    Decorates a class with a give docorator. Returns a subclass with
+    dectorations applied
+
+    Parameters
+    ----------
+    cls : Class
+          A class to be decorated
+
+    decorator : callable
+                callable to wrap cls's methods with
+
+    exclude : list
+              list of method names to exclude from being decorated
+
+    args, kwargs : list, dict
+                   Parameters to pass into decorator
+    """
+    if not callable(decorator):
+        raise Exception('Decorator must be callable.')
+
+    def decorate(cls):
+        attributes = cls.__dict__.keys()
+        for attr in attributes: # there's propably a better way to do this
+            if callable(getattr(cls, attr)):
+                name = getattr(cls, attr).__name__
+                if name[0] == '_' or name in exclude:
+                    continue
+                setattr(cls, attr, decorator(getattr(cls, attr)))
+        return cls
+    # return decorated copy (i.e. a subclass with decorations)
+    return decorate(type('cls_copy', cls.__bases__, dict(cls.__dict__)))
+
+def create_decorator(dec, **namespace):
+    """
+    Create a decorator function using arbirary params. The objects passed in
+    can be used in the body. Originally designed with the idea of automatically
+    updating one object after the decorated object was modified.
+    """
+
+    def decorator(func, *args, **kwargs):
+        def wrapper(*args, **kwarg):
+            for key in namespace.keys():
+                locals()[key] = namespace[key]
+            ret = func(*args, **kwargs)
+            exec(dec.__code__, locals(), globals())
+            if ret:
+                return ret
+        return wrapper
+    return decorator

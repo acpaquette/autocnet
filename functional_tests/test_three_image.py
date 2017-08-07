@@ -53,8 +53,6 @@ class TestThreeImageMatching(unittest.TestCase):
         cg.apply_func_to_edges("compute_homography", clean_keys=['symmetry', 'ratio'])
         cg.compute_fundamental_matrices(clean_keys=['symmetry', 'ratio'], reproj_threshold=3.0, method='ransac')
 
-
-
     def tearDown(self):
         try:
             os.path.remove('TestThreeImageMatching.net')

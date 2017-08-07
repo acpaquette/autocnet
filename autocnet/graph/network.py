@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 import itertools
 import math
 import os
@@ -16,6 +16,7 @@ import shapely.ops
 from plio.io import io_hdf, io_json
 from plio.utils import utils as io_utils
 from plio.io.io_gdal import GeoDataset
+from plio.io.isis_serial_number import generate_serial_number
 from autocnet.cg.cg import geom_mask
 from autocnet.cg.cg import compute_voronoi
 from autocnet.graph import markov_cluster
@@ -23,6 +24,7 @@ from autocnet.graph.edge import Edge
 from autocnet.graph.node import Node
 from autocnet.io import network as io_network
 from autocnet.vis.graph_view import plot_graph, cluster_plot
+from autocnet.control import control
 
 
 # The total number of pixels squared that can fit into the keys number of GB of RAM for SIFT.
@@ -116,7 +118,6 @@ class CandidateGraph(nx.Graph):
         else:
             self._maxsize = MAXSIZE[value]
 
-
     @classmethod
     def from_filelist(cls, filelist, basepath=None):
         """
@@ -189,7 +190,9 @@ class CandidateGraph(nx.Graph):
         --------
         >>> from autocnet.examples import get_path
         >>> inputfile = get_path('adjacency.json')
-        >>> candidate_graph = network.CandidateGraph.from_adjacency(inputfile)
+        >>> candidate_graph = CandidateGraph.from_adjacency(inputfile)
+        >>> sorted(candidate_graph.nodes())
+        [0, 1, 2, 3, 4, 5]
         """
         if not isinstance(input_adjacency, dict):
             input_adjacency = io_json.read_json(input_adjacency)
@@ -198,6 +201,10 @@ class CandidateGraph(nx.Graph):
                 input_adjacency[k] = [os.path.join(basepath, i) for i in v]
                 input_adjacency[os.path.join(basepath, k)] = input_adjacency.pop(k)
         return cls(input_adjacency)
+
+    @classmethod
+    def from_save(cls, input_file):
+        return io_network.load(input_file)
 
     def _update_date(self):
         """
@@ -277,7 +284,6 @@ class CandidateGraph(nx.Graph):
         """
         for source, destination, e in self.edges_iter(data=True):
             e.extract_subset(*args, **kwargs)
-
 
     def save_features(self, out_path, nodes=[], **kwargs):
         """
@@ -623,6 +629,28 @@ class CandidateGraph(nx.Graph):
         """
         return sorted(nx.connected_components(self), key=len, reverse=True)
 
+    def serials(self):
+        """
+        Create a dictionary of ISIS3 compliant serial numbers for each
+        node in the graph.
+
+        Returns
+        -------
+        serials : dict
+                  with key equal to the node id and value equal to
+                  an ISIS3 compliant serial number or None
+        """
+        serials = {}
+        for i, n in self.nodes_iter(data=True):
+            serials[n['node_id']] = generate_serial_number(n['image_path'])
+        return serials
+
+    def files(self):
+        """
+        Return a list of all full file PATHs in the CandidateGraph
+        """
+        return [d['image_path'] for i, d in self.nodes_iter(data=True)]
+
     def save(self, filename):
         """
         Save the graph object to disk.
@@ -906,6 +934,60 @@ class CandidateGraph(nx.Graph):
 
             edge['weights']['voronoi'] = voronoi_df
 
+    def compute_unique_fully_connected_components(self, size=2):
+        """
+        Compute a list of all cliques with size greater than size.
+
+        Parameters
+        ----------
+        size : int
+               Only cliques larger than size are returned.  Default 2.
+
+        Returns
+        -------
+         : list
+           of lists of node ids
+
+        Examples
+        --------
+        >>> G = CandidateGraph()
+        >>> G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
+        >>> res = G.compute_unique_fully_connected_components()
+        >>> res[0].sort()
+        >>> res[1].sort()
+        >>> res.sort()
+        >>> res  # Sorted to force key order
+        [['A', 'B', 'C'], ['A', 'E', 'F']]
+        """
+        return [i for i in nx.enumerate_all_cliques(self) if len(i) > size]
+
+    def compute_fully_connected_components(self):
+        """
+        For a given graph, compute all of the fully connected subgraphs with
+        3+ components.
+
+        Returns
+        -------
+        fc : list
+             of lists of node identifiers
+
+        Examples
+        --------
+        >>> G = CandidateGraph()
+        >>> G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
+        >>> fc = G.compute_fully_connected_components()
+        >>> len(fc) #A, B, C, E, A  - D is omitted because it is a singular terminal node
+        5
+        >>> # fc  # Or there about given dict ordering inside the graph
+        ['A', 'B', 'C'], ['A', 'E', 'F']]
+        """
+        fully_connected = self.compute_unique_fully_connected_components()
+        fc = defaultdict(list)
+        for i in fully_connected:
+            for j in i:
+                fc[j].append(tuple(i))
+        return fc
+
     def compute_intersection(self, source, clean_keys=[]):
         """
         Computes the intercetion of all images in a graph
@@ -981,3 +1063,16 @@ class CandidateGraph(nx.Graph):
     def footprints(self):
         geoms = [n.footprint for i, n in self.nodes_iter(data=True)]
         return gpd.GeoDataFrame(geometry=geoms)
+
+    def create_control_network(self, clean_keys=[]):
+        matches = self.get_matches(clean_keys=clean_keys)
+        self.controlnetwork = control.ControlNetwork.from_candidategraph(matches)
+
+    def identify_potential_overlaps(self, **kwargs):
+        cc = control.identify_potential_overlaps(self, self.controlnetwork, **kwargs)
+        print(cc)
+
+    def to_isis(self, outname, *args, **kwargs):
+        serials = self.serials()
+        files = self.files()
+        self.controlnetwork.to_isis(outname, serials, files, *args, **kwargs)

@@ -55,6 +55,25 @@ def test_size(graph):
 
     assert graph.size('edge_weight') == graph.number_of_edges()*10
 
+def test_serials(geo_graph):
+    serials = ['APOLLO15/METRIC/1971-07-31T01:25:02.243',
+               'APOLLO15/METRIC/1971-07-31T01:25:27.457',
+               'APOLLO15/METRIC/1971-07-31T01:25:52.669']
+    for s in serials:
+        assert s in geo_graph.serials().values()
+
+"""def test_fully_connected_components():
+    G = network.CandidateGraph()
+    G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
+    fc = G.compute_fully_connected_components()
+    truth = [['A', 'B', 'C'], ['A', 'E', 'F']]
+    sorted_fca = sorted(list(map(sorted, fc['A'])))
+    assert truth == sorted_fca"""
+
+def test_unique_fully_connected():
+    G = network.CandidateGraph()
+    G.add_edges_from([('A', 'B'), ('A', 'C'), ('B', 'C'), ('B', 'D'), ('A', 'E'), ('A', 'F'), ('E', 'F') ])
+    fc = G.compute_fully_connected_components()
 
 def test_add_image(graph):
     with pytest.raises(NotImplementedError):

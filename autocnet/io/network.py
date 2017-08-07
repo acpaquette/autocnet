@@ -118,6 +118,7 @@ def load(projectname):
             edge.destination = cg.node[e['target']]
             edge['fundamental_matrix'] = e['fundamental_matrix']
             edge['weights'] = e['weights']
+
             try:
                 nzf = np.load(BytesIO(pzip.read('{}_{}.npz'.format(e['source'], e['target']))))
                 edge.masks = pd.DataFrame(nzf['masks'], index=nzf['masks_idx'], columns=nzf['masks_columns'])
@@ -127,5 +128,5 @@ def load(projectname):
             # Add a mock edge
             cg.edge[e['source']][e['target']] = edge
 
-            cg._order_adjacency()
+        cg._order_adjacency
     return cg

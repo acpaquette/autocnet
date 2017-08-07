@@ -1,5 +1,6 @@
 import numpy as np
 from autocnet.camera.utils import crossform
+from autocnet.utils.utils import normalize_vector
 try:
     import cv2
 except:
@@ -28,6 +29,22 @@ def compute_epipoles(f):
 
     return e, e1
 
+def compute_epipolar_line(keypoint, f_matrix):
+    """
+    Parameters
+    ----------
+    f_matrxi : ndarray
+                    (3, 3) fundamental matrix or autocnet Fundamental Matrix object
+
+    keypoint : ndarray
+                      (1, 3) keypoint with x, y, and z
+
+    Returns
+    ----------
+    : ndarray
+      (1, 3) normalized epipolar line
+    """
+    return normalize_vector(keypoint.dot(f_matrix))
 
 def idealized_camera():
     """

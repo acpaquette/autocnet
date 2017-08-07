@@ -12,7 +12,6 @@ from shapely.geometry import Polygon
 from shapely import wkt
 
 from autocnet.cg import cg
-from autocnet.control.control import Correspondence, Point
 
 from autocnet.io import keypoints as io_keypoints
 
@@ -83,6 +82,32 @@ class Node(dict, MutableMapping):
         Type: {}
         """.format(self['node_id'], self['image_name'], self['image_path'],
                    self.nkeypoints, self.masks, self.__class__)
+
+    def __hash__(self):
+        return hash(repr(self))
+
+    def __gt__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid > oid
+
+    def __geq__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid >= oid
+
+    def __lt__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid < oid
+
+    def __leq__(self, other):
+        myid = self['node_id']
+        oid = other['node_id']
+        return myid <= oid
+
+    def __str__(self):
+        return str(self['node_id'])
 
     def __eq__(self, other):
         eq = True
@@ -436,7 +461,6 @@ class Node(dict, MutableMapping):
         io_keypoints.to_npy(self.keypoints, self.descriptors,
                             out_path)
 
-
     def group_correspondences(self, cg, *args, deepen=False, **kwargs):
         """
 
@@ -485,26 +509,20 @@ class Node(dict, MutableMapping):
             point = Point(pid)
             #print(g[['source_image', 'destination_image']])
             covered_edges = list(map(tuple, g[['source_image', 'destination_image']].values))
-            s = g['source_image'].iat[0]
-            d = g['destination_image'].iat[0]
-            # The reference edge that we are deepening with
-            ab = cg.edge[s][d]
+            ab = cg.edge[covered_edges[0][0]][covered_edges[0][1]]
 
             # Get the coordinates of the search correspondence
-            ab_keypoints = ab.source.get_raw_keypoint_coordinates(index=g['source_idx'])
+            ab_keypoints = ab.source.get_keypoint_coordinates(index=g['source_idx'])
             ab_x = None
+
             for j, (r_idx, r) in enumerate(g.iterrows()):
-                if len(g) == 1:
-                    kp = ab_keypoints
-                else:
-                    kp = ab_keypoints[j]
+                kp = ab_keypoints.iloc[j].values
+
                 # Homogenize the coord used for epipolar projection
                 if ab_x is None:
                     ab_x = np.array([kp[0], kp[1], 1.])
 
-                kpd = ab.destination.get_raw_keypoint_coordinates(index=g['destination_idx'])
-                if len(kpd.shape) > 1:
-                    kpd = kpd[0]
+                kpd = ab.destination.get_keypoint_coordinates(index=g['destination_idx']).values[0]
                 # Add the existing source and destination correspondences
                 self.point_to_correspondence[point].add((r['source_image'],
                                                                   Correspondence(r['source_idx'],

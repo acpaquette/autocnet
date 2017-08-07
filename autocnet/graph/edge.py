@@ -570,5 +570,5 @@ class Edge(dict, MutableMapping):
         dkps.columns = ['destination_x', 'destination_y']
         match = match.join(skps, on='source_idx')
         match = match.join(dkps, on='destination_idx')
-        matches.append(match)
-        return matches
+        # matches.append(match)
+        return match

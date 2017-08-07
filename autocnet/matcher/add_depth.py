@@ -3,7 +3,7 @@ import numpy as np
 from autocnet.utils.utils import normalize_vector
 
 
-def deepen_correspondences(ab_kp, bc, source_idx,
+def deepen_correspondences(ab_node, bc, keypoint_idx,
                            clean_keys=['fundamental'],
                            geometric_threshold=2):
     """
@@ -37,12 +37,6 @@ def deepen_correspondences(ab_kp, bc, source_idx,
                           from the corresponding epipolar line to still be considered
                           an inlier.
     """
-
-    # Grab the edge and the edge candidate coordinates
-    bc_x = np.empty((bc.destination.nkeypoints, 3))
-    bc_x[:, -1] = 1.0
-    bc_x[:, :2] = bc.destination.get_keypoint_coordinates().values
-
     # Grab F for reprojection
     f_matrix = bc['fundamental_matrix']
 
@@ -50,13 +44,18 @@ def deepen_correspondences(ab_kp, bc, source_idx,
         return None, None
 
     # Compute the epipolar line projecting point ab into bc
-    epipolar_line = normalize_vector(ab_kp.dot(f_matrix.T))
+    ab_kp = ab_node.get_keypoint_coordinates(homogeneous = True).loc[keypoint_idx]
+    epipolar_line = camera.compute_epipolar_line(f_matrix, ab_kp)
 
     # Check to see if a previously removed candidate fulfills the threshold geometric constraint
-    bc_candidates = bc.matches[(bc.matches['source_idx'] == source_idx)]
-    bc_candidate_coords = np.empty((len(bc_candidates), 3))
-    bc_candidate_coords[:, -1] = 1.
-    bc_candidate_coords[:, :2] = bc.destination.get_keypoint_coordinates(index=bc_candidates['destination_idx']).values
+    if node['node_id'] == edge.source['node_id']:
+        bc_candidates = bc.matches[(bc.matches['source_idx'] == keypoint_idx)]
+        bc_candidate_coords = bc.destination.get_keypoint_coordinates(index=bc_candidates['destination_idx'],
+                                                                      homogeneous = True).values
+    else:
+        bc_candidates = bc.matches[(bc.matches['destination_idx'] == keypoint_idx)]
+        bc_candidate_coords = bc.source.get_keypoint_coordinates(index=bc_candidates['source_idx'],
+                                                                      homogeneous = True).values
     bc_distance = np.abs(epipolar_line.dot(bc_candidate_coords.T))
 
     # Get the matches

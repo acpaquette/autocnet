@@ -443,7 +443,7 @@ class CandidateGraph(nx.Graph):
                 ret = func(*args, **kwargs)
                 return_lis.append(ret)
 
-        if any(return_lis):
+        if len(return_lis) > 0:
             return return_lis
 
 
@@ -1070,7 +1070,7 @@ class CandidateGraph(nx.Graph):
 
     def identify_potential_overlaps(self, **kwargs):
         cc = control.identify_potential_overlaps(self, self.controlnetwork, **kwargs)
-        print(cc)
+        return cc
 
     def to_isis(self, outname, *args, **kwargs):
         serials = self.serials()

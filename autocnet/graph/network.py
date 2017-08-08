@@ -88,12 +88,9 @@ class CandidateGraph(nx.Graph):
         self.graph['creationdate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
         self.graph['modifieddate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
 
-<<<<<<< HEAD
     def get_matches(self, clean_keys=[], edges=[]):
         return self.apply_func_to_edges('get_matches')
 
-=======
->>>>>>> 1bec1bfeabcfae5680aa2aa0c7b0a649850f5143
     def __eq__(self, other):
         eq = True
         # Check the nodes

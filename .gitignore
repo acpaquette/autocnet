@@ -2,6 +2,10 @@
 /.ipynb*
 *.ipynb*
 
+# Notebooks dir
+notebooks/*
+!notebooks/*.ipynb
+
 #PyCharm
 /.idea
 
@@ -70,6 +74,10 @@ target/
 *.swp
 
 #Data and output files
-.csv
-.png
-.SAV
+*.csv
+*.png
+*.SAV
+*.net
+*.cnet
+*.lis
+*.list

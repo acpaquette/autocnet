@@ -176,7 +176,7 @@ class ControlNetwork(object):
 
         return self.data.groupby('point_id').apply(func)
 
-    def to_isis(self, outname, serials, olist, *args, **kwargs):
+    def to_isis(self, outname, serials, olist, *args, **kwargs): #pragma: no cover
         """
         Write the control network out to the ISIS3 control network format.
         """

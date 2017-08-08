@@ -42,18 +42,14 @@ def normalize_vector(line):
 
     Examples
     --------
-    >>> x = np.random.random((3,3))
+    >>> x = np.array([3, 1, 2])
     >>> normalize_vector(x)
-    array([[ 0.88280225,  0.4697448 ,  0.11460811],
-       [ 0.26090555,  0.96536433,  0.91648305],
-       [ 0.58271501,  0.81267657,  0.30796395]])
+    array([ 0.80178373,  0.26726124,  0.53452248])
     """
     if isinstance(line, pd.DataFrame):
         line = line.values
-    n = line[0]**2 + line[1]**2 + line[2]**2
-    line /= np.sqrt(n)
-    return line
-
+    n = np.sqrt((line[0]**2 + line[1]**2 + line[2]**2))
+    return line / abs(n)
 
 def getnearest(iterable, value):
     """

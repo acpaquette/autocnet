@@ -509,6 +509,12 @@ class Node(dict, MutableMapping):
             point = Point(pid)
             #print(g[['source_image', 'destination_image']])
             covered_edges = list(map(tuple, g[['source_image', 'destination_image']].values))
+<<<<<<< HEAD
+=======
+            s = g['source_image'].iat[0]
+            d = g['destination_image'].iat[0]
+            # The reference edge that we are deepening with
+>>>>>>> 1bec1bfeabcfae5680aa2aa0c7b0a649850f5143
             ab = cg.edge[covered_edges[0][0]][covered_edges[0][1]]
 
             # Get the coordinates of the search correspondence

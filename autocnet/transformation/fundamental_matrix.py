@@ -45,8 +45,10 @@ def compute_reprojection_error(F, x, x1, index=None):
     if x1.shape[1] != 3:
         x1 = make_homogeneous(x1)
 
-    x = x.values
-    x1 = x1.values
+    if isinstance(x, (pd.Series, pd.DataFrame)):
+        x = x.values
+    if isinstance(x1, (pd.Series, pd.DataFrame)):
+        x1 = x1.values
 
     # Normalize the vector
     l1 = normalize_vector(F.dot(x.T))
@@ -56,7 +58,7 @@ def compute_reprojection_error(F, x, x1, index=None):
     dist2 = np.sum(l2.conj() * x.T, axis=0)
     F_error = np.sqrt(dist1**2 + dist2**2)
 
-    if index:
+    if index is not None:
         F_error = pd.Series(F_error, index=index)
 
     return F_error
@@ -64,6 +66,8 @@ def compute_reprojection_error(F, x, x1, index=None):
     l_norms = normalize_vector(x.dot(F.T))
     F_error = np.abs(np.sum(l_norms * x1, axis=1))
 
+    if index:
+        F_error = pd.Series(F_error, index=index)
     return F_error
 
 def compute_fundamental_error(F, x, x1):

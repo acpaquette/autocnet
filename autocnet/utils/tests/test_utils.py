@@ -110,16 +110,6 @@ class TestUtils(unittest.TestCase):
         cleaned_array = utils.remove_field_name(starray, 'index')
         np.testing.assert_array_equal(cleaned_array, truth)
 
-    def test_normalize_vector(self):
-        x = np.array([1,1,1], dtype=np.float)
-        y = utils.normalize_vector(x)
-        np.testing.assert_array_almost_equal(np.array([ 0.70710678,  0.70710678,  0.70710678]), y)
-
-        x = np.repeat(np.arange(1,5), 3).reshape(-1, 3)
-        y = utils.normalize_vector(x)
-        truth = np.tile(np.array([ 0.70710678,  0.70710678,  0.70710678]), 4).reshape(4,3)
-        np.testing.assert_array_almost_equal(truth, y)
-
     def test_slope(self):
         x1 = pd.DataFrame({'x': np.arange(1, 11),
                            'y': np.arange(1, 11)})

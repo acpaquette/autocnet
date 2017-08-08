@@ -86,6 +86,15 @@ class TestFundamentalMatrix(unittest.TestCase):
                                             self.fixed_x2)
         self.assertTrue(err.mean() < 0.5)
 
+    def test_f_reprojection_error_pd(self):
+        index = np.arange(10)[::-1]
+        err = fm.compute_reprojection_error(self.fixed_f,
+                                            self.fixed_x1,
+                                            self.fixed_x2,
+                                            index=index)
+        self.assertIsInstance(err, pd.Series)
+        np.testing.assert_array_equal(err.index, index)
+
     def test_f_fundamental_error(self):
         err = fm.compute_fundamental_error(self.fixed_f,
                                            self.fixed_x1,
@@ -101,7 +110,7 @@ class TestFundamentalMatrix(unittest.TestCase):
         F, mask = fm.compute_fundamental_matrix(fp, tp, method='ransac')
 
         new_mask = fm.update_fundamental_mask(F, fp, tp, threshold=0.5, method='reprojection')
-        self.assertEqual(10, new_mask['fundamental'].sum())
+        self.assertEqual(8, new_mask['fundamental'].sum())
 
     def test_update_fundamental_mask_with_index(self):
         np.random.seed(12345)

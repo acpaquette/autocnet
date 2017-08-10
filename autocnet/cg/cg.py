@@ -141,7 +141,7 @@ def get_area(poly1, poly2):
     return intersection_area
 
 
-def compute_voronoi(keypoints, intersection=None, geometry=False, s=30): # ADDED
+def compute_voronoi(keypoints, intersection=None, geometry=False, s=30):
         """
         Creates a voronoi diagram for all edges in a graph, and assigns a given
         weight to each edge. This is based around voronoi polygons generated

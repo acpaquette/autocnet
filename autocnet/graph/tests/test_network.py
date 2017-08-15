@@ -76,8 +76,115 @@ def test_unique_fully_connected():
     fc = G.compute_fully_connected_components()
 
 def test_add_image(graph):
-    with pytest.raises(NotImplementedError):
-        graph.add_image()
+    # apply_func
+    def extract_and_match(edge):
+        for n in [edge.source, edge.destination]:
+            n.extract_features(n.get_array(band=1),
+                               extractor_parameters={'nfeatures': 800})
+        edge.match()
+
+    basepath = get_path('Apollo15')
+    cube_adjacency = {"AS15-M-0297_crop.cub": ["AS15-M-0298_crop.cub"],
+                      "AS15-M-0298_crop.cub": ["AS15-M-0297_crop.cub"]}
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency, basepath=basepath)
+
+    # Test with all optional args
+    cub_img = "AS15-M-0299_crop.cub"
+    png_img = "AS15-M-0299_SML.png"
+
+    cub_adj = ["AS15-M-0298_crop.cub", "AS15-M-0297_crop.cub"]
+
+    png_adj = ["AS15-M-0298_crop.cub", "AS15-M-0297_crop.cub"]
+    cang.add_image(cub_img, adjacency=cub_adj, basepath=basepath,
+                   apply_func=extract_and_match)
+
+    # Assert everything worked properly
+    assert cub_img in cang.graph['node_name_map'].keys()
+    new_node_idx = cang.graph['node_name_map'][cub_img]
+    assert new_node_idx in cang.node.keys()
+    assert cang.node[new_node_idx]['image_name'] == cub_img
+    assert sorted(cang.nodes()) == [0, 1, 2]
+    assert sorted(cang.edges()) == [(0, 1), (0, 2), (1, 2)]
+    assert cang[0][2].destination['image_name'] == cang.edge[0][2].destination['image_name'] == cub_img
+    assert cang[1][2].destination['image_name'] == cang.edge[1][2].destination['image_name'] == cub_img
+
+    # Test when img is already in graph
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cang.add_image(cub_adj[0], basepath=basepath)
+
+    # Test for file not found
+    with pytest.raises(FileNotFoundError):
+        cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                     basepath=basepath)
+        cang.add_image(cub_img, basepath=None)
+
+    # Test with auto-detect adjacency
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cang.add_image(cub_img, basepath=basepath)
+
+    # Test auto-detect when there are nodes w/ invalid geospacial data
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cang.add_image(png_img, adjacency=png_adj, basepath=basepath)  # Invalid
+    cang.add_image(cub_img, basepath=basepath)  # Autodetect
+
+    # Test auto-detect when new node does not intersect
+    # Need a non-intersecting cube file
+
+    # Test when adjacency is list of nodes
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cub_adj2 = [cang.node[0], cang.node[1]]
+    cang.add_image(cub_img, adjacency=cub_adj2, basepath=basepath)
+
+    # Test when an adjacency node is not in graph
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cub_adj2 = [cang.node[0], cang.node[1]]
+    not_there = node.Node("_" + cub_img, os.path.join(basepath, cub_img), 15)
+    adj = [not_there]
+    edges_bf = cang.edges()
+    cang.add_image(cub_img, adjacency=adj, basepath=basepath)
+    assert cang.edges() == edges_bf     # Should be no change in edges
+
+    # Test when adjacency is of wrong type
+    with pytest.raises(TypeError):
+        cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                     basepath=basepath)
+        cang.add_image(png_img, adjacency=1, basepath=basepath)  # Invalid
+    with pytest.raises(TypeError):
+        cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                     basepath=basepath)
+        cang.add_image(png_img, adjacency=[1], basepath=basepath)  # Invalid
+
+    # Test when no adjacency supplied, but image doesn't have footprint;
+    # This results in a disconnected node added to the graph
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    edges_bf = cang.edges()
+    cang.add_image(png_img, basepath=basepath)
+    assert cang.edges() == edges_bf    # Assert no change in edges
+
+    # Test when adjacency includes a node not already in the graph
+    adj = cub_adj
+    adj.append("AS15-M-0300_crop.cub")
+    cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                 basepath=basepath)
+    cang.add_image(cub_img, adjacency=adj, basepath=basepath)
+
+    # Test when apply_func is not a function / list of functions
+    with pytest.raises(TypeError):
+        cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                     basepath=basepath)
+        cang.add_image(cub_img, adjacency=cub_adj, basepath=basepath,
+                       apply_func=1)
+    with pytest.raises(TypeError):
+        cang = network.CandidateGraph.from_adjacency(cube_adjacency,
+                                                     basepath=basepath)
+        cang.add_image(cub_img, adjacency=cub_adj, basepath=basepath,
+                       apply_func=[extract_and_match, 1])
 
 
 def test_island_nodes(disconnected_graph):

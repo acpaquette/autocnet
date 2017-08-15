@@ -555,7 +555,13 @@ class Edge(dict, MutableMapping):
         Estimate a source and destination minimum bounding rectangle, in
         pixel space
         """
-        self.overlap_latlon_coords, self["source_mbr"], self["destin_mbr"] = self.source.geodata.compute_overlap(self.destination.geodata, **kwargs)
+        try:
+            self.overlap_latlon_coords, self["source_mbr"], self["destin_mbr"] = self.source.geodata.compute_overlap(self.destination.geodata, **kwargs)
+        except Exception as e:
+            raise Exception("Overlap between {} and {} could not be "
+                            "computed: {}".format(self.source['image_name'],
+                                                  self.destination['image_name'],
+                                                  type(e)))
 
     def get_matches(self): # pragma: no cover
         if self.matches.empty:

@@ -28,11 +28,12 @@ from autocnet.control import control
 
 
 # The total number of pixels squared that can fit into the keys number of GB of RAM for SIFT.
-MAXSIZE = {0:None,
-           2:6250,
-           4:8840,
-           8:12500,
-           12:15310}
+MAXSIZE = {0: None,
+           2: 6250,
+           4: 8840,
+           8: 12500,
+           12: 15310}
+
 
 class CandidateGraph(nx.Graph):
     """
@@ -166,7 +167,7 @@ class CandidateGraph(nx.Graph):
                     adjacency_dict[i.file_name].append(j.file_name)
                     adjacency_dict[j.file_name].append(i.file_name)
             except:
-                warnings.warn('Failed to calculated intersection between {} and {}'.format(i, j))
+                warnings.warn('Failed to calculate intersection between {} and {}'.format(i, j))
 
         return cls(adjacency_dict)
 
@@ -230,16 +231,198 @@ class CandidateGraph(nx.Graph):
         """
         return self.node[node_index]['image_name']
 
-    def add_image(self, *args, **kwargs):
+    def add_image(self, image_name, adjacency=None, basepath=None, apply_func=None):
         """
         Adds an image node to the graph.
 
         Parameters
         ----------
+        image_name : str
+                     The file name of or path to the image to add
+
+        adjacency : string or Node list
+                    The list of adjacent Nodes or image files for this image
+
+        basepath : str
+                   The directory path for the image
+
+        apply_func : function
+                     A static function that takes an Edge as its parameter
+                     Function will be applied to all Edges generated when adding
+                     the image
 
         """
-        raise NotImplementedError
-        self._order_adjacency()
+
+        def add_node(img_pth):
+            """
+            Adds a new, disconnected Node to the graph and returns a reference
+            to it
+
+            img_pth : The absolute path to the image
+
+            Returns
+            -------
+            Node : A reference to the added Node
+
+            """
+
+            # Check that image path exists
+            try:
+                assert os.path.exists(img_pth)
+            except AssertionError:
+                raise FileNotFoundError("Could not add {} to CandidateGraph; "
+                                        "File does not exist".format(img_pth))
+
+            # Grab the image name
+            img_nm = os.path.basename(img_pth)
+
+            # Get the node id & map [id -> Node] in the graph
+            id = self.graph['node_counter']
+            node = Node(img_nm, img_pth, id)
+            self.node[id] = node
+
+            # Map [image name -> id] in the graph and increment node counter
+            self.graph['node_name_map'][img_nm] = id
+            self.graph['node_counter'] += 1
+
+            # Return the Node reference
+            return node
+
+        # Check if image is already in the graph
+        if image_name in self.graph['node_name_map']:
+            warnings.warn("{} is already in the graph".format(image_name))
+            return
+
+        # Basepath resolution
+        if basepath:
+            image_path = os.path.join(basepath, image_name)
+        else:
+            image_path = image_name
+            image_name = os.path.basename(image_path)
+
+        # Create new node within graph
+        new_node = add_node(image_path)
+
+        # If adjacency supplied make sure it's the right type
+        if adjacency:
+            # Type check
+            try:
+                assert type(adjacency) is list
+            except AssertionError:
+                raise TypeError("Named parameter 'adjacency' must be a list of"
+                                "adjacent Node objects or list of adjacent "
+                                "images; Could not add {} to "
+                                "CandidateGraph".format(image_name))
+
+        # If adjacency not supplied, figure it out from footprints
+        else:
+            # Create empty adjacency list
+            adjacency = list()
+
+            # Make sure new node has valid footprint; If not, it will be a
+            # disconnected node on the graph
+            if not new_node.geodata.footprint or not \
+                    new_node.geodata.footprint.IsValid():
+                warnings.warn('Missing or invalid geospatial data for '
+                              '{0}; {0} will be added to the CandidateGraph'
+                              'as a disconnected Node'.format(image_name))
+                return
+
+            # Detect adjacency between our new node and the CG's nodes
+            target_nodes = [self.node[idx] for idx in self.nodes()]
+            valid_datasets = list()
+            datasets = [node.geodata for node in target_nodes]
+
+            # Make sure target nodes have valid footprints
+            for ds in datasets:
+                # Skip the source node if it's in the list of target nodes
+                if ds.file_name == new_node['image_path']:
+                    continue
+                # Grab footprints from nodes that have them
+                fp = ds.footprint
+                if fp and fp.IsValid():
+                    valid_datasets.append(ds)
+                else:
+                    warnings.warn('Missing or invalid geospatial data for '
+                                  '{}'.format(os.path.basename(ds.file_name)))
+
+            # Grab the footprints and test for intersection
+            for ds in valid_datasets:
+                ds_file_name = os.path.basename(ds.file_name)
+                try:
+                    if new_node.geodata.footprint.Intersects(ds.footprint):
+                        adjacency.append(ds_file_name)
+                except:
+                    warnings.warn('Failed to calculate intersection between {} '
+                                  'and {}'.format(image_name, ds_file_name))
+
+        # Build new edge(s) from adjacency
+        for a_img in adjacency:
+            # If string (image name)
+            if isinstance(a_img, str):
+                # If adjacent img is already in the graph
+                if a_img in self.graph['node_name_map'].keys():
+                    # Set the nodes for the new edge
+                    a_node_idx = self.graph['node_name_map'][a_img]
+                    s = self.node[a_node_idx]
+                    d = new_node
+
+                # If adjacent img isnt already in graph, add it
+                else:
+                    # Set the nodes for the new graph
+                    s = new_node
+                    d = add_node(os.path.join(basepath, a_img))
+            # If Node
+            elif isinstance(a_img, Node):
+                # If it's already in the graph, it'll be the source node,
+                # since its idx is lower than our new node
+                if a_img['image_name'] in [self.node[idx]['image_name'] for idx in self.nodes()]:
+                    s = a_img
+                    d = new_node
+                # Otherwise, can't create edge
+                else:
+                    warnings.warn("{0} is not in the graph; No Edge between"
+                                  "{0} and {1} can be "
+                                  "created".format(a_img['image_name'],
+                                                   image_name))
+                    continue
+            else:
+                raise TypeError("Adjacency list contains Node objects or image "
+                                "names; Could not add {} to "
+                                "CandidateGraph".format(image_name))
+
+            # Create the new edge
+            new_edge = Edge(s, d)
+
+            # If there's a clean func for the new edge, apply it
+            if apply_func:
+                ERR = "Named parameter 'apply_func' must be a static " \
+                      "function or list of static functions; These " \
+                      "function(s) are applied to all new edges generated " \
+                      "when adding {0}; Could not add {0} to " \
+                      "CandidateGraph".format(image_name)
+                # Type Check
+                try:
+                    assert callable(apply_func) or type(apply_func) is list
+                    # If it's a function, apply it
+                    if callable(apply_func):
+                        apply_func(new_edge)
+                    # If it's a list of functions, apply all of them
+                    else:
+                        [func(new_edge) for func in apply_func]
+                except AssertionError:
+                    raise TypeError(ERR)
+
+            # Grab node ids
+            s_id = s['node_id']
+            d_id = d['node_id']
+
+            # Make sure source node is a key in the edge lookup
+            if s_id not in self.edge.keys():
+                self.edge[s_id] = dict()
+
+            # Add the new edge to the graph
+            self.edge[s_id][d_id] = new_edge
 
     def extract_features(self, band=1, *args, **kwargs):  # pragma: no cover
         """
@@ -445,7 +628,6 @@ class CandidateGraph(nx.Graph):
 
         if len(return_lis) > 0:
             return return_lis
-
 
     def apply(self, function, on='edge',out=None, args=(), **kwargs):
         """

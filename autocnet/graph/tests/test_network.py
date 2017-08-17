@@ -1,9 +1,10 @@
+import copy
 import os
 import time
 import sys
 
+import pandas as pd
 import pytest
-import unittest
 
 from unittest.mock import patch, PropertyMock, MagicMock
 
@@ -41,12 +42,48 @@ def geo_graph():
 def disconnected_graph():
     return network.CandidateGraph.from_adjacency(get_path('adjacency.json'))
 
+@pytest.fixture()
+def candidategraph(node_a, node_b, node_c):
+    # TODO: Getting this fixture from the global conf is causing deepycopy
+    # to fail.  Why?
+    cg = network.CandidateGraph()
+
+    # Create a candidategraph object - we instantiate a real CandidateGraph to
+    # have access of networkx functionality we do not want to test and then
+    # mock all autocnet functionality to control test behavior.
+    edges = [(0,1), (0,2), (1,2)]
+    cg.add_edges_from(edges)
+
+    match_indices = [([0,1,2,3,4,5,6,7], [0,1,2,3,4,5,6,7]),
+                     ([0,1,2,3,4,5,8,9], [0,1,2,3,4,5,8,9]),
+                     ([0,1,2,3,4,5,8,9], [0,1,2,3,4,5,6,7])]
+
+    matches = []
+    for i, e in enumerate(edges):
+        c = match_indices[i]
+        source_image = np.repeat(e[0], 8)
+        destin_image = np.repeat(e[1], 8)
+        coords = np.zeros(8)
+        data = np.vstack((source_image, c[0], destin_image, c[1],
+                          coords, coords, coords, coords)).T
+        matches_df = pd.DataFrame(data, columns=['source_image', 'source_idx', 'destination_image', 'destination_idx',
+                                                 'source_x', 'source_y', 'destination_x', 'destination_y'])
+        matches.append(matches_df)
+
+    # Mock in autocnet methods
+    cg.get_matches = MagicMock(return_value=matches)
+
+    # Mock in the node objects onto the candidate graph
+    cg.node[0] = node_a
+    cg.node[1] = node_b
+    cg.node[2] = node_c
+
+    return cg
 
 def test_get_name(graph):
     node_number = graph.graph['node_name_map']['AS15-M-0297_SML.png']
     name = graph.get_name(node_number)
     assert name == 'AS15-M-0297_SML.png'
-
 
 def test_size(graph):
     assert graph.size() == graph.number_of_edges()
@@ -186,6 +223,31 @@ def test_add_image(graph):
         cang.add_image(cub_img, adjacency=cub_adj, basepath=basepath,
                        apply_func=[extract_and_match, 1])
 
+def test_equal(candidategraph):
+    cg = copy.deepcopy(candidategraph)
+    assert candidategraph == cg
+
+    cg = copy.deepcopy(candidategraph)
+    cg.remove_edge(0,1)
+    assert candidategraph != cg
+
+    cg = copy.deepcopy(candidategraph)
+    cg.remove_node(0)
+    assert candidategraph != cg
+
+    cg = copy.deepcopy(candidategraph)
+    cg.node[0]['image_name'] = 'foo'
+    assert candidategraph != cg
+
+    cg = copy.deepcopy(candidategraph)
+    cg.edge[0][1]['fundamental_matrix'] = np.random.random((3,3))
+    assert candidategraph != cg
+
+def test_get_matches(candidategraph):
+    matches = candidategraph.get_matches()
+    assert len(matches) == 3
+    assert len(matches[0]) == 8
+    assert isinstance(matches[0], pd.DataFrame)
 
 def test_island_nodes(disconnected_graph):
     assert len(disconnected_graph.island_nodes()) == 1
@@ -374,7 +436,6 @@ def test_update_data(graph):
    ntime = graph.graph['modifieddate']
    assert ctime != ntime
 
-
 def test_is_complete(graph):
     # Create a small incomplete graph with three nodes and two edges
     incomplete_graph = network.CandidateGraph()
@@ -383,14 +444,18 @@ def test_is_complete(graph):
 
     assert False == incomplete_graph.is_complete()
     assert True == graph.is_complete()
-    
+
+def test_get_matches(candidategraph):
+    matches = candidategraph.get_matches()
+    assert len(matches) == 3
+    assert 'source_x' in matches[0].columns
+    assert len(matches[0]) == 8
+
 def test_apply(graph):
-    def set_matches(x):
-        s,d,e = x
+    def set_matches(e):
         e.matches = ['fake', 'fake', 'fake']
 
-    def get_matches(x):
-        s,d,e = x
+    def get_matches(e):
         return e.matches
 
     graph.apply(set_matches)
@@ -398,6 +463,12 @@ def test_apply(graph):
 
     for matches in results:
         assert len(matches) == 3
+
+def test_tofilelist(graph):
+    flist = graph.to_filelist()
+    truth = ['AS15-M-0297_SML.png', 'AS15-M-0298_SML.png', 'AS15-M-0299_SML.png']
+    basenames = sorted([os.path.basename(i) for i in flist])
+    assert truth == basenames
 
 def test_footprints(geo_graph):
     # This is just testing the interface - should get a geodataframe back

@@ -44,38 +44,40 @@ def save(network, projectname):
     """
     # Convert the graph into json format
     js = json_graph.node_link_data(network)
-
     with ZipFile(projectname, 'w') as pzip:
         js_str = json.dumps(js, cls=NumpyEncoder, sort_keys=True, indent=4)
         pzip.writestr('graph.json', js_str)
 
         # Write the array node_attributes to hdf
         for n, data in network.nodes_iter(data=True):
-            if data.descriptors is not None:
-                grp = data['node_id']
-                np.savez('{}.npz'.format(data['node_id']),
-                         descriptors=data.descriptors,
-                         keypoints=data.keypoints,
-                         keypoints_idx=data.keypoints.index,
-                         keypoints_columns=data.keypoints.columns)
-                pzip.write('{}.npz'.format(data['node_id']))
-                os.remove('{}.npz'.format(data['node_id']))
+            ndarrays_to_write = {}
+            for k, v in data.__dict__.items():
+                if isinstance(v, np.ndarray):
+                    ndarrays_to_write[k] = v
+                elif isinstance(v, pd.DataFrame):
+                    ndarrays_to_write[k] = v
+                    ndarrays_to_write[k+'_idx'] = v.index
+                    ndarrays_to_write[k+'_columns'] = v.columns
+
+            np.savez('{}.npz'.format(data['node_id']),**ndarrays_to_write)
+            pzip.write('{}.npz'.format(data['node_id']))
+            os.remove('{}.npz'.format(data['node_id']))
 
         # Write the array edge attributes to hdf
         for s, d, data in network.edges_iter(data=True):
             if s > d:
                 s, d = d, s
-            if data.matches is not None:
-                grp = str((s,d))
-                np.savez('{}_{}.npz'.format(s, d),
-                         matches=data.matches,
-                         matches_idx=data.matches.index,
-                         matches_columns=data.matches.columns,
-                         masks=data.masks,
-                         masks_idx=data.masks.index,
-                         masks_columns=data.masks.columns)
-                pzip.write('{}_{}.npz'.format(s, d))
-                os.remove('{}_{}.npz'.format(s, d))
+            ndarrays_to_write = {}
+            for k,v in data.__dict__.items():
+                if isinstance(v, np.ndarray):
+                    ndarrays_to_write[k] = v
+                elif isinstance(v, pd.DataFrame):
+                    ndarrays_to_write[k] = v
+                    ndarrays_to_write[k+'_idx'] = v.index
+                    ndarrays_to_write[k+'_columns'] = v.columns
+            np.savez('{}_{}.npz'.format(s, d),**ndarrays_to_write)
+            pzip.write('{}_{}.npz'.format(s, d))
+            os.remove('{}_{}.npz'.format(s, d))
 
 def json_numpy_obj_hook(dct):
     """Decodes a previously encoded numpy ndarray with proper shape and dtype.
@@ -101,23 +103,31 @@ def load(projectname):
         cg.graph = data['graph']
         # Handle nodes
         for d in data['nodes']:
-            n = Node(image_name=d['image_name'], image_path=d['image_path'], node_id=d['id'])
-            n['hash'] = d['hash']
-            n['downsample_amount'] = d.get('downsample_amount', 1)
+            n = Node()
+            for k, v in d.items():
+                if k == 'id':
+                    continue
+                n[k] = v
             try:
                 # Load the byte stream for the nested npz file into memory and then unpack
                 n.load_features(BytesIO(pzip.read('{}.npz'.format(d['id']))))
+                nzf = np.load(BytesIO(pzip.read('{}.npz'.format(d['id']))))
+                n.masks = pd.DataFrame(nzf['masks'], index=nzf['masks_idx'], columns=nzf['masks_columns'])
             except:
                 pass  # The node does not have features to load.
             cg.add_node(d['node_id'])
             cg.node[d['node_id']] = n
+
         for e in data['links']:
             cg.add_edge(e['source'], e['target'])
             edge = Edge()
             edge.source = cg.node[e['source']]
             edge.destination = cg.node[e['target']]
-            edge['fundamental_matrix'] = e['fundamental_matrix']
-            edge['weights'] = e['weights']
+
+            for k, v in e.items():
+                if k == 'target' or k == 'source':
+                    continue
+                edge[k] = v
 
             try:
                 nzf = np.load(BytesIO(pzip.read('{}_{}.npz'.format(e['source'], e['target']))))

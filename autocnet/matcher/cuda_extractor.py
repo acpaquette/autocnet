@@ -1,7 +1,10 @@
 import warnings
 
-import cudasift as cs
-
+try:
+    import cudasift as cs
+except:
+    cs = None
+    
 def extract_features(array, nfeatures=None, **kwargs):
     """
     A custom docstring.

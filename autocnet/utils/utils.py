@@ -8,6 +8,49 @@ import networkx as nx
 
 from osgeo import ogr
 
+def compare_dicts(d, o):
+    """
+    Given two dictionaries, compare them with support for np.ndarray and
+    pd.DataFrame objects
+
+    Parameters
+    ----------
+    d : dict
+        first dict to compare
+
+    o : dict
+        second dict to compare
+
+    Examples
+    --------
+    >>> d = {'a':0}
+    >>> o = {'a':0}
+    >>> compare_dicts(d, o)
+    True
+    >>> d['a'] = 1
+    >>> compare_dicts(d,o)
+    False
+    >>> d['a'] = np.arange(3)
+    >>> o['a'] = np.arange(3)
+    >>> compare_dicts(d,o)
+    True
+    """
+    if o.keys() != d.keys():
+        return False
+    for k, v in d.items():
+        if isinstance(v, pd.DataFrame):
+            if not v.equals(o[k]):
+                return False
+        elif isinstance(v, np.ndarray):
+            if not v.all() == o[k].all():
+                return False
+        else:
+            if k == '_geodata':
+                continue
+            if not v == o[k]:
+                return False
+    return True
+
 def crossform(a):
     """
     Return the cross form, e.g. a in the cross product of a b.

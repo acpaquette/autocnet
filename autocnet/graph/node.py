@@ -65,9 +65,6 @@ class Node(dict, MutableMapping):
         self['image_path'] = image_path
         self['node_id'] = node_id
         self['hash'] = image_name
-        self._mask_arrays = {}
-        self.point_to_correspondence = defaultdict(set)
-        self.point_to_correspondence_df = None
         self.descriptors = None
         self.keypoints = pd.DataFrame()
         self.masks = pd.DataFrame()
@@ -83,7 +80,7 @@ class Node(dict, MutableMapping):
         """.format(self['node_id'], self['image_name'], self['image_path'],
                    self.nkeypoints, self.masks, self.__class__)
 
-    def __hash__(self):
+    def __hash__(self): #pragma: no cover
         return hash(repr(self))
 
     def __gt__(self, other):
@@ -91,7 +88,7 @@ class Node(dict, MutableMapping):
         oid = other['node_id']
         return myid > oid
 
-    def __geq__(self, other):
+    def __ge__(self, other):
         myid = self['node_id']
         oid = other['node_id']
         return myid >= oid
@@ -101,7 +98,7 @@ class Node(dict, MutableMapping):
         oid = other['node_id']
         return myid < oid
 
-    def __leq__(self, other):
+    def __le__(self, other):
         myid = self['node_id']
         oid = other['node_id']
         return myid <= oid
@@ -110,32 +107,9 @@ class Node(dict, MutableMapping):
         return str(self['node_id'])
 
     def __eq__(self, other):
-        eq = True
-        d = self.__dict__
-        o = other.__dict__
-        for k, v in d.items():
-            if isinstance(v, pd.DataFrame):
-                if not v.equals(o[k]):
-                    eq = False
-            elif isinstance(v, np.ndarray):
-                if not v.all() == o[k].all():
-                    eq = False
-        return eq
-    """
-    def __getitem__(self, item):
-        attribute_dict = {'image_name': self['image_name'],
-                          'image_path': self['image_path'],
-                          'geodata': self.geodata,
-                          'keypoints': self.keypoints,
-                          'nkeypoints': self.nkeypoints,
-                          'descriptors': self.descriptors,
-                          'masks': self.masks,
-                          'isis_serial': self.isis_serial}
-        if item in attribute_dict.keys():
-            return attribute_dict[item]
-        else:
-            return super(Node, self).__getitem__(item)
-    """
+        return utils.compare_dicts(self.__dict__, other.__dict__) *\
+               utils.compare_dicts(self, other)
+
 
     @property
     def geodata(self):
@@ -146,31 +120,6 @@ class Node(dict, MutableMapping):
             return self._geodata
         else:
             return None
-
-    """    @property
-    def masks(self):
-        mask_lookup = {'suppression': 'suppression'}
-
-        if self.keypoints is None:
-            warnings.warn('Keypoints have not been extracted')
-            return
-
-        if not hasattr(self, '_masks'):
-            self._masks = pd.DataFrame(index=self.keypoints.index)
-
-        # If the mask is coming form another object that tracks
-        # state, dynamically draw the mask from the object.
-        for c in self._masks.columns:
-            if c in mask_lookup:
-                self._masks[c] = getattr(self, mask_lookup[c]).mask
-        return self._masks
-
-    @masks.setter
-    def masks(self, v):
-        column_name = v[0]
-        boolean_mask = v[1]
-        self.masks[column_name] = boolean_mask
-    """
 
     @property
     def footprint(self):
@@ -209,8 +158,8 @@ class Node(dict, MutableMapping):
         Returns
         -------
         coverage_area :  float
-                        Area covered by the generated
-                        keypoints
+                         percentage area covered by the generated
+                         keypoints
         """
 
         points = self.get_keypoint_coordinates()
@@ -222,9 +171,7 @@ class Node(dict, MutableMapping):
 
         total_area = max_x * max_y
 
-        self.coverage_area = (hull_area/total_area)*100
-
-        return self.coverage_area
+        return hull_area / total_area
 
     def get_byte_array(self, band=1):
         """
@@ -298,17 +245,21 @@ class Node(dict, MutableMapping):
 
         return keypoints
 
-    def get_raw_keypoint_coordinates(self, index):
+    def get_raw_keypoint_coordinates(self, index=slice(None)):
         """
         The performance of get_keypoint_coordinates can be slow
         due to the ability for fancier indexing.  This method
         returns coordinates using numpy array accessors.
+
+        Parameters
+        ----------
+        index : iterable
+                positional indices to return from the global keypoints dataframe
         """
-        index = index.astype(np.int)
         return self.keypoints.values[index,:2]
 
     @staticmethod
-    def _extract_features(array, *args, **kwargs):
+    def _extract_features(array, *args, **kwargs):  # pragma: no cover
         """
         Extract features for the node
 
@@ -442,145 +393,20 @@ class Node(dict, MutableMapping):
     def save_features(self, out_path):
         """
         Save the extracted keypoints and descriptors to
-        the given HDF5 file.  By default, the .npz files are saved
+        the given file.  By default, the .npz files are saved
         along side the image, e.g. in the same folder as the image.
 
         Parameters
         ----------
         out_path : str or object
-                   PATH to the hdf file or a HDFDataset object handle
-
-        format : {'npy', 'hdf'}
-                 The desired output format.
+                   PATH to the directory for output and base file name
         """
-
         if self.keypoints.empty:
             warnings.warn('Node {} has not had features extracted.'.format(self['node_id']))
             return
 
         io_keypoints.to_npy(self.keypoints, self.descriptors,
-                            out_path)
-
-    def group_correspondences(self, cg, *args, deepen=False, **kwargs):
-        """
-
-        Parameters
-        ----------
-        cg : object
-             The graph object this node is a member of
-
-        deepen : bool
-                 If True, attempt to punch matches through to all incident edges.  Default: False
-        """
-        node = self['node_id']
-        # Get the edges incident to the current node
-        incident_edges = set(cg.edges(node)).intersection(set(cg.edges()))
-
-        # If this node is free floating, ignore it.
-        if not incident_edges:
-             # TODO: Add dangling correspondences to control network anyway.  Subgraphs handle this segmentation if req.
-            return
-
-        try:
-            clean_keys = kwargs['clean_keys']
-        except:
-            clean_keys = []
-
-        # Grab all the incident edge matches and concatenate into a group match set.
-        # All share the same source node
-        edge_matches = []
-        for e in incident_edges:
-            edge = cg[e[0]][e[1]]
-            matches, mask = edge.clean(clean_keys=clean_keys)
-            # Add a depth mask that initially mirrors the fundamental mask
-            edge_matches.append(matches)
-        d = pd.concat(edge_matches)
-
-        # Counter for point identifiers
-        pid = 0
-
-        # Iterate through all of the correspondences and attempt to add additional correspondences using
-        # the epipolar constraint
-        for idx, g in d.groupby('source_idx'):
-            # Pull the source index to be used as the search
-            source_idx = g['source_idx'].values[0]
-
-            # Add the point object onto the node
-            point = Point(pid)
-            #print(g[['source_image', 'destination_image']])
-            covered_edges = list(map(tuple, g[['source_image', 'destination_image']].values))
-            s = g['source_image'].iat[0]
-            d = g['destination_image'].iat[0]
-            # The reference edge that we are deepening with
-            ab = cg.edge[covered_edges[0][0]][covered_edges[0][1]]
-
-            # Get the coordinates of the search correspondence
-            ab_keypoints = ab.source.get_keypoint_coordinates(index=g['source_idx'])
-            ab_x = None
-
-            for j, (r_idx, r) in enumerate(g.iterrows()):
-                kp = ab_keypoints.iloc[j].values
-
-                # Homogenize the coord used for epipolar projection
-                if ab_x is None:
-                    ab_x = np.array([kp[0], kp[1], 1.])
-
-                kpd = ab.destination.get_keypoint_coordinates(index=g['destination_idx']).values[0]
-                # Add the existing source and destination correspondences
-                self.point_to_correspondence[point].add((r['source_image'],
-                                                                  Correspondence(r['source_idx'],
-                                                                                 kp[0],
-                                                                                 kp[1],
-                                                                                 serial=self.isis_serial)))
-                self.point_to_correspondence[point].add((r['destination_image'],
-                                                                  Correspondence(r['destination_idx'],
-                                                                                 kpd[0],
-                                                                                 kpd[1],
-                                                                                 serial=cg.node[r['destination_image']].isis_serial)))
-
-            # If the user wants to punch correspondences through
-            if deepen:
-                search_edges = incident_edges.difference(set(covered_edges))
-                for search_edge in search_edges:
-                    bc = cg.edge[search_edge[0]][search_edge[1]]
-                    coords, idx = deepen_correspondences(ab_x, bc, source_idx)
-
-                    if coords is not None:
-                        cg.node[node].point_to_correspondence[point].add((search_edge[1],
-                                                                          Correspondence(idx,
-                                                                                         coords[0],
-                                                                                         coords[1],
-                                                                                         serial=cg.node[search_edge[1]].isis_serial)))
-
-            pid += 1
-
-        # Convert the dict to a dataframe
-        data = []
-        for k, measures in self.point_to_correspondence.items():
-            for image_id, m in measures:
-                data.append((k.point_id, k.point_type, m.serial, m.measure_type, m.x, m.y, image_id))
-
-        columns = ['point_id', 'point_type', 'serialnumber', 'measure_type', 'x', 'y', 'node_id']
-        self.point_to_correspondence_df = pd.DataFrame(data, columns=columns)
-
-    def coverage_ratio(self, clean_keys=[]):
-        """
-        Compute the ratio $area_{convexhull} / area_{total}$
-
-        Returns
-        -------
-        ratio : float
-                The ratio of convex hull area to total area.
-        """
-        ideal_area = self.geodata.pixel_area
-        if not hasattr(self, 'keypoints'):
-            raise AttributeError('Keypoints must be extracted already, they have not been.')
-
-        #TODO: clean_keys are disabled - re-enable.
-        keypoints = self.get_keypoint_coordinates()
-
-        ratio = convex_hull_ratio(keypoints, ideal_area)
-        return ratio
+                            out_path + '_{}.npz'.format(self['node_id']))
 
     def plot(self, clean_keys=[], **kwargs):  # pragma: no cover
         return plot_node(self, clean_keys=clean_keys, **kwargs)

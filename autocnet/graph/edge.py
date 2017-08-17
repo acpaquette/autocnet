@@ -59,40 +59,8 @@ class Edge(dict, MutableMapping):
         """.format(self.source, self.destination, self.masks)
 
     def __eq__(self, other):
-        eq = True
-        d = self.__dict__
-        o = other.__dict__
-        for k, v in d.items():
-            # If the attribute key is missing they can not be equal
-            if not k in o.keys():
-                eq = False
-                return eq
-
-            if isinstance(v, pd.DataFrame):
-                if not v.equals(o[k]):
-                    eq = False
-            elif isinstance(v, np.ndarray):
-                if not v.all() == o[k].all():
-                    eq = False
-
-        return eq
-
-    """@property
-    def masks(self):
-        mask_lookup = {'fundamental': 'fundamental_matrix'}
-        if not hasattr(self, '_masks'):
-            if isinstance(self.matches, pd.DataFrame):
-                self._masks = pd.DataFrame(True, columns=['symmetry'],
-                                           index=self.matches.index)
-            else:
-                self._masks = pd.DataFrame()
-        return self._masks
-
-    @masks.setter
-    def masks(self, v):
-        column_name = v[0]
-        boolean_mask = v[1]
-        self.masks[column_name] = boolean_mask"""
+        return utils.compare_dicts(self.__dict__, other.__dict__) *\
+               utils.compare_dicts(self, other)
 
     def match(self, k=2, **kwargs):
 
@@ -135,27 +103,6 @@ class Edge(dict, MutableMapping):
 
     def decompose_and_match(*args, **kwargs):
         pass
-
-    """
-    def extract_subset(self, *args, **kwargs):
-        self.compute_overlap()
-
-        # Extract the source
-        minx, maxx, miny, maxy = self['source_mbr']
-        xystart = (minx, miny)
-        pixels=[minx, miny, maxx-minx, maxy-miny]
-        node = self.source
-        arr = node.geodata.read_array(pixels=pixels)
-        node.extract_features(arr, xystart=xystart, *args, **kwargs)
-
-        # Extract the destination
-        minx, maxx, miny, maxy = self['destin_mbr']
-        xystart = (minx, miny)
-        pixels=[minx, miny, maxx-minx, maxy-miny]
-        node = self.destination
-        arr = node.geodata.read_array(pixels=pixels)
-        node.extract_features(arr, xystart=xystart, *args, **kwargs)
-    """
 
     def overlap_check(self):
         """Creates a mask for matches on the overlap"""

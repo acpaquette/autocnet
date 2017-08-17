@@ -40,6 +40,18 @@ class TestNode(object):
         assert (1012, 1012) == image.shape
         assert np.uint8 == image.dtype
 
+    def test_equalities(self,node_a, node_b):
+        assert node_a < node_b
+        assert node_a <= node_b
+        assert not (node_a > node_b)
+        assert not (node_a >= node_b)
+        assert not (node_a == node_b)
+
+        node_a.random_attr = np.arange(10)
+        node_b.random_attr = np.arange(10)
+
+        assert not (node_a == node_b)
+
     def test_get_array(self, node):
         image = node.get_array()
         assert (1012, 1012) == image.shape
@@ -73,6 +85,9 @@ class TestNode(object):
         assert kps['x'].min() < tilesize
         assert kps['y'].min() < tilesize
         assert len(kps) == pytest.approx(90, 3)
+
+        with pytest.raises(ValueError) as e_info:
+            node.extract_features_with_tiling(tilesize=10, overlap=20)
 
     def test_masks(self, node):
         image = node.get_array()
@@ -110,17 +125,17 @@ class TestNode(object):
         # With keypoints to npy
         reference = pd.DataFrame(np.arange(10).reshape(5,2), columns=['x', 'y'])
         node.keypoints = reference
-        tmpdir.join('kps.npz')
-        node.save_features(os.path.join(basename, 'kps.npz'))
+        tmpdir.join('kps')
+        node.save_features(os.path.join(basename, 'kps'))
         node.keypoints = None
-        node.load_features(os.path.join(basename, 'kps.npz'))
+        node.load_features(os.path.join(basename, 'kps_None.npz'))
         assert node.keypoints.equals(reference)
 
     def test_coverage(self, node):
         image = node.get_array()
         node.extract_features(image, extractor_method='sift', extractor_parameters={'nfeatures': 10})
         coverage_percn = node.coverage()
-        assert coverage_percn == pytest.approx(38.06139557, 2)
+        assert coverage_percn == pytest.approx(0.3806139557, 2)
 
     def test_clean(self, node):
         with pytest.raises(AttributeError):
@@ -132,7 +147,36 @@ class TestNode(object):
         matches, mask = node._clean(clean_keys=['a'])
         assert mask.equals(pd.Series([True, True, True, False, False]))
 
-    def test_footprint(self, geo_node):
+    def test_get_keypoints(self, node):
+        image = node.get_array()
+        node.extract_features(image, extractor_parameters={'nfeatures':5})
+        kps = node.get_keypoints(index=[1,3])
+        assert len(kps) == 2
+        assert 1 in kps.index and 3 in kps.index
+
+    def test_get_keypoint_coordinates(self, node):
+        image = node.get_array()
+        node.extract_features(image, extractor_parameters={'nfeatures':5})
+        kpc = node.get_keypoint_coordinates()
+        assert 'x' in kpc.columns
+        assert 'y' in kpc.columns
+        kpc = node.get_keypoint_coordinates(index=[2,4])
+        assert len(kpc) == 2
+        kpc = node.get_keypoint_coordinates(homogeneous=True)
+        assert (kpc.homogeneous == 1).all()
+
+    def test_get_raw_keypoint_coordinates(self, node):
+        image = node.get_array()
+        node.extract_features(image, extractor_parameters={'nfeatures':5})
+        kpc = node.get_raw_keypoint_coordinates()
+        assert isinstance(kpc, np.ndarray)
+        assert kpc.shape == (5,2)
+
+        kpc = node.get_raw_keypoint_coordinates(-1)
+        assert kpc.shape == (2,)
+
+
+    def test_footprint(self, geo_node, node_a):
         # Esnure that a shapely compliant poly is being returned
         assert isinstance(geo_node.footprint, Polygon)
-        
+        assert node_a.footprint == None

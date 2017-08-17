@@ -1,4 +1,7 @@
-import cudasift as cs
+try:
+    import cudasift as cs
+except:
+    cs = None
 import numpy as np
 import pandas as pd
 

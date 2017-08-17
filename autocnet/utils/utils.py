@@ -455,3 +455,37 @@ def create_decorator(dec, **namespace):
                 return ret
         return wrapper
     return decorator
+
+def get_x(y, m, b):
+    """
+    Get the x value of a line given the y coord, slope(m), and y intercept (b)
+    """
+    return (m/y) - b
+
+def get_y(x, m, b):
+    """
+    Get the x value of a line given the x coord, slope(m), and y intercept (b)
+    """
+    return (m*x) + b
+
+def source_to_dest(kp, source, destination, homogeneous = False):
+    """
+    Using a kp, an edge source, and an edge destination. Translate that keypoints
+    from source to destination.
+    """
+    source_latlon = source.geodata.pixel_to_latlon(kp[0], kp[1])
+    if homogeneous:
+        return destination.geodata.latlon_to_pixel(source_latlon[0], source_latlon[1]) + (1,)
+    else:
+        return destination.geodata.latlon_to_pixel(source_latlon[0], source_latlon[1])
+
+def dest_to_source(kp, source, destination, homogeneous = False):
+    """
+    Using a kp, an edge source, and an edge destination. Translate that keypoints
+    from destination to source.
+    """
+    destin_latlon = destination.geodata.pixel_to_latlon(kp[0], kp[1])
+    if homogeneous:
+        return source.geodata.latlon_to_pixel(destin_latlon[0], destin_latlon[1]) + (1,)
+    else:
+        return source.geodata.latlon_to_pixel(destin_latlon[0], destin_latlon[1])

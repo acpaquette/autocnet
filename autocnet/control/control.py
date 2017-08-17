@@ -5,6 +5,7 @@ import geopandas as gpd
 from shapely.geometry import Point
 
 from plio.io.io_controlnetwork import to_isis, write_filelist
+from autocnet.matcher.deepen_funcs import dist_to_epipolar
 
 
 def identify_potential_overlaps(cg, cn, overlap=True):
@@ -13,8 +14,8 @@ def identify_potential_overlaps(cg, cn, overlap=True):
 
     Parameters
     ----------
-    overlap : boolean
-              If True, apply aprint(g)n additional point in polygon check, where
+    overlap : bool
+              If True, apply an additional point in polygon check, where
               the polygon is the footprint intersection between images and
               the point is a keypoint projected into lat/lon space.  Note
               that the projection can be inaccurate if the method used
@@ -90,8 +91,125 @@ def identify_potential_overlaps(cg, cn, overlap=True):
     else:
          return candidate_cliques.candidates
 
-def deepen_correspondences(cg, cn):
-    pass
+
+def deepen_correspondences(cg, overlap, func=dist_to_epipolar, dist = 275, *args, **kwargs):
+    """
+    Given some cg, find and deepen all points that have the potential to exist
+    in more images than the currently do.
+
+    Parameters
+    ----------
+    cg : object
+         Networkx graph object
+
+    overlap : bool
+              Boolean to limit the candidates of the method to only points
+              that lie within the overlap between two images
+
+    func : function
+           Static function that returns keypoint indices
+
+    dist : int
+           Threshold to use when comparing descriptor distances
+
+    Returns
+    ----------
+    all_measures : list
+                   A list of keypoint index, (source, destination), and new correspondences pairs
+    """
+    # TODO: Shouldn't return these values. Should append them to the
+    # controlnetwork data dataframe. Or be adjusted as needed.
+
+    # Get the candidates that lie within the overlap as an innitial mask
+    candidates = identify_potential_overlaps(cg, cg.controlnetwork, overlap)
+    all_measures = []
+    # Loop through the candidates
+    for i, j in enumerate(candidates):
+        # Get the control point, "source", and keypoint for the candidate
+        control_point = cg.controlnetwork.data.query('point_id == ' + str(candidates.index[i]))
+        source = control_point.loc[control_point.index[0]].image_index
+        kp_idx = control_point.loc[control_point.index[0]].keypoint_index
+        # Loop over all potential images that should overlap
+        for destination in j:
+            # Create an edge based off of source and destination
+            edge = cg.edge[source][destination]
+            if source < destination:
+                keypoints = edge.destination.get_keypoint_coordinates(homogeneous = True).values
+            else:
+                keypoints = edge.source.get_keypoint_coordinates(homogeneous = True).values
+            new_correspondence = find_match(kp_idx, keypoints, edge, source, destination, dist, func, *args, **kwargs)
+            measure = [kp_idx, (source, destination), new_correspondence]
+            all_measures.append(measure)
+    return all_measures
+
+
+def find_match(keypoint_idx, keypoints, edge, source, destination, dist, func, *args, **kwargs):
+    """
+    Parameters
+    ----------
+    keypoint_idx : int
+                   Index value for a given keypoint
+
+    keypoints : list
+                A list of x, y coordinate pairs from either source or
+                destination
+
+    edge : object
+           networkx edge object
+
+    source : int
+             Node id of a source image
+
+    destination : int
+                  Node id of a destination image
+
+    dist : int
+           Threshold to use when comparing descriptor distances
+
+    func : function
+           Static function that takes in at least keypoint(x, y pair),
+           keypoints(list of x, y pairs), edge(edge object), source(int),
+           destination(int)
+
+    Returns
+    ----------
+    all_measures : list
+                   A list of keypoint index, (source, destination), and new correspondences pairs
+    """
+    # TODO: Explore possible ways to find points that aren't already defined
+    # matches. In other words. Find some way to not return none if nothing
+    # from matches is found.
+
+    # TODO: Find some way to clean this up. It's basically duplicated code.
+
+    matches, mask = edge.clean(clean_keys = [])
+    # Find potential good matches that were thrown out due to a check
+    if source < destination:
+        keypoint = edge.source.get_keypoint_coordinates(index = keypoint_idx, homogeneous=True).values
+        # Use some function to limit the number of correspondences
+        correspondences = func(keypoint, keypoints, edge, source, destination, *args, **kwargs)
+        # Check if those correspondences exist as a match within some distance threshold
+        kp_id_matches = matches.loc[matches['source_idx'] == keypoint_idx]
+        edge_id_matches = kp_id_matches[kp_id_matches['destination_idx'].isin(correspondences)]
+        dist_matches = edge_id_matches[edge_id_matches['distance'] < dist]
+        # If there is some reasonable correspondence return the found match index
+        if any(dist_matches):
+            return matches.loc[dist_matches.loc[:, ['distance']].idxmin()].destination_idx.values
+        else:
+            subpixel_keypoints = edge.destination.get_keypoint_coordinates(index = correspondences).values
+    else:
+        # Same as above but all calculations are source, destination dependent
+        keypoint = edge.destination.get_keypoint_coordinates(index = keypoint_idx, homogeneous=True).values
+        correspondences = func(keypoint, keypoints, edge, source, destination, *args, **kwargs)
+        kp_id_matches = matches.loc[matches['destination_idx'] == keypoint_idx]
+        edge_id_matches = kp_id_matches[kp_id_matches['source_idx'].isin(correspondences)]
+        dist_matches = edge_id_matches[edge_id_matches['distance'] < dist]
+        if any(dist_matches):
+            return matches.loc[dist_matches.loc[:, ['distance']].idxmin()].source_idx.values
+        else:
+            subpixel_keypoints = edge.source.get_keypoint_coordinates(index = correspondences).values
+    return None
+
 
 class ControlNetwork(object):
     measures_keys = ['point_id', 'image_index', 'keypoint_index', 'edge', 'match_idx', 'x', 'y']

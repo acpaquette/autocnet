@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 
-def nearest_neighbor(keypoint, keypoints, edge, source, destination, num_neighbors = 20): 
+def nearest_neighbor(keypoint, keypoints, edge, source, destination, num_neighbors = 20):
     """
     Given some keypoint in either source or destination, reproject said keypoint
     into the other image and find the n nearest neighbors using the list of
@@ -75,6 +75,9 @@ def dist_to_epipolar(keypoint, keypoints, edge, source, destination, geometric_t
       A list of points that lie within the geometric threshold of the epipolar
       line.
     """
+    # Needs to use the tranpose of the fundamental matrix if you are drawing
+    # the epipolar line in source image, and the normal fundamental matrix if
+    # you are drawing the epipolar line on the destination image
     if source < destination:
         f_matrix = edge['fundamental_matrix'].T
     else:

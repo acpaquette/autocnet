@@ -474,10 +474,10 @@ def source_to_dest(kp, source, destination, homogeneous = False):
     from source to destination.
     """
     source_latlon = source.geodata.pixel_to_latlon(kp[0], kp[1])
+    destin_xy = destination.geodata.latlon_to_pixel(source_latlon[0], source_latlon[1])
     if homogeneous:
-        return destination.geodata.latlon_to_pixel(source_latlon[0], source_latlon[1]) + (1,)
-    else:
-        return destination.geodata.latlon_to_pixel(source_latlon[0], source_latlon[1])
+        return destin_xy + (1,)
+    return destin_xy
 
 def dest_to_source(kp, source, destination, homogeneous = False):
     """
@@ -485,7 +485,7 @@ def dest_to_source(kp, source, destination, homogeneous = False):
     from destination to source.
     """
     destin_latlon = destination.geodata.pixel_to_latlon(kp[0], kp[1])
+    source_xy = source.geodata.latlon_to_pixel(destin_latlon[0], destin_latlon[1])
     if homogeneous:
-        return source.geodata.latlon_to_pixel(destin_latlon[0], destin_latlon[1]) + (1,)
-    else:
-        return source.geodata.latlon_to_pixel(destin_latlon[0], destin_latlon[1])
+        return source_xy + (1,)
+    return source_xy

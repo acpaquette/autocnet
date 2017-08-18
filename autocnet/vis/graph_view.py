@@ -254,7 +254,7 @@ def plot_edge(edge, ax=None, clean_keys=[], image_space=100, downsampling=1,
         downsample_destin = downsampling
     destination_array = edge.destination.get_array()
     destination_array = downsample(destination_array, downsample_destin)
-    
+
     s_shape = source_array.shape
     d_shape = destination_array.shape
 
@@ -341,4 +341,120 @@ def cluster_plot(graph, ax=None, cmap='Spectral'):  # pragma: no cover
                 continue
 
     nx.draw(graph, ax=ax, node_color=colors)
+    return ax
+
+def plot_eline(edge, source, destin, source_kp_idx, destin_kp_idx, ax = None):
+    """
+    Plots an epipolar line with the source and destination images, along with
+    the associated indicies of the keypoints.
+
+    -->NOTE<--: source and destin have to be in the order that the epipolar
+    line is computed. If you want an epipolar line from the 1, 0 edge on the 0
+    image source must be 1 and destination must be 0. The same is true for the
+    source_kp_idx and destin_kp_idx, the source should be from 1 and the
+    destination should be from 0
+    Parameters
+    ----------
+
+    edge : object
+           networkx edge object
+
+    source : int
+             The node id of the source image
+
+    destination : int
+                  The node if of the destination image
+
+    source_kp_idx : int
+                    Source keypoint index
+
+    destin_kp_idx : int
+                    Destination keypoint index
+
+    ax : object
+         A MatPlotLIb axes object
+
+    Returns
+    ----------
+    ax : object
+         A MatPlotLIb axes object. Either the argument passed in
+         or a new object
+    """
+    # TODO: Add better arguments. Bring in line with the rest of vis
+    # ALSO: Potentially change the indices to keypoints, may help make things
+    # a little easier.
+    if ax is None:
+        ax = plt.gca()
+    # Code "Borrowed" from plot_edge
+    # with some hard coded values
+    downsample_source = 1
+    source_array = edge.source.get_array()
+
+    downsample_destin = 1
+    destination_array = edge.destination.get_array()
+
+    s_shape = source_array.shape
+    d_shape = destination_array.shape
+
+    y = max(s_shape[0], d_shape[0])
+    x = s_shape[1] + d_shape[1] + 100
+    composite = np.zeros((y, x))
+
+    composite[0: s_shape[0], :s_shape[1]] = source_array
+    composite[0: d_shape[0], s_shape[1] + 100:] = destination_array
+
+    r = lambda: random.uniform(0.0, 1.0)
+    color = [r(), r(), r()]
+
+    if not hasattr(source_kp_idx, '__iter__'):
+        s_i = np.asarray([source_kp_idx])
+    else:
+        s_i = source_kp_idx
+
+    if not hasattr(destin_kp_idx, '__iter__'):
+        d_i = np.asarray([destin_kp_idx])
+    else:
+        d_i = destin_kp_idx
+
+    # Compute the epipolar line deepending on the source and destination given
+    if source < destin:
+        keypoint = edge.source.get_keypoint_coordinates(index = s_i, homogeneous = True).values
+        reproj_keypoint = source_to_dest(keypoint[0], edge.source, edge.destination)
+        f_matrix = edge['fundamental_matrix'].T
+    else:
+        keypoint = edge.destination.get_keypoint_coordinates(index = d_i, homogeneous = True).values
+        reproj_keypoint = dest_to_source(keypoint[0], edge.source, edge.destination)
+        f_matrix = edge['fundamental_matrix']
+
+    e_line = compute_epipolar_line(keypoint[0], f_matrix=f_matrix)
+    m=(-(e_line[0]/e_line[1]))
+    b=(-(e_line[2]/e_line[1]))
+
+    ax.imshow(composite, cmap="Greys")
+
+    ax.plot(edge.source.get_keypoint_coordinates(index = s_i).x,
+         edge.source.get_keypoint_coordinates(index = s_i).y,
+         markersize = 7, marker = '.', linewidth = 0, color = 'r')
+
+    x_offset = s_shape[1] + 100
+
+    destin_coords = edge.destination.get_keypoint_coordinates(index = d_i)
+    destin_xcoords = destin_coords.x + x_offset
+    destin_ycoords = destin_coords.y
+
+    e_line_x = np.asarray([0, d_shape[0]])
+    e_line_y = np.asarray([get_y(0, m, b), get_y(500, m, b)])
+
+    if source < destin:
+        e_line_x = e_line_x + x_offset
+        reproj_keypoint[0] = reproj_keypoint[0] + x_offset
+
+    ax.plot(destin_xcoords, destin_ycoords,
+         markersize = 7, marker = '.', linewidth = 0, color = 'r')
+
+    ax.plot(e_line_x, e_line_y,
+         color = 'y', linewidth = 3, alpha = .3)
+    ax.plot(reproj_keypoint[0], reproj_keypoint[1],
+         markersize = 7, marker = '.', linewidth = 0, color = 'b')
+
     return ax

@@ -12,6 +12,64 @@ try:
 except:  # pragma: no cover
     cv_avail = False
 
+def compute_epipolar_lines(F, x, index=None):
+    """
+    Given a fundamental matrix and a set of homogeneous points
+
+    Parameters
+    ----------
+    F : ndarray
+        of shape (3,3) that represents the fundamental matrix
+
+    x : ndarray
+        of shape (n, 3) of homogeneous coordinates
+
+    Returns
+    -------
+    lines : ndarray
+            of shape (n,3) of epipolar lines in standard form
+    """
+    if isinstance(x, pd.DataFrame):
+        x = x.values
+
+    if not x.shape[1] == 3:
+        raise ValueError('The input points must be homogenous with shape (n,3)')
+
+    # Compute the unnormalized epipolar lines
+    lines = np.inner(F, x)
+
+    # Normalize the lines
+    nu = lines[0] ** 2 + lines[1] ** 2
+    try:
+        nu = 1 / np.sqrt(nu)
+    except:
+        nu = 1
+    lines *= nu
+
+    lines = lines.T
+
+    if index is not None:
+        lines = pd.DataFrame(lines, columns=['a', 'b', 'c'], index=index)
+
+    # Inner transposes the result, so transpose back into the 3 column form
+    return lines
+
+def epipolar_distance(lines, pts):
+    """
+    Given a set of epipolar lines and a set of points, compute the euclidean
+    distance between each point and the corresponding epipolar line
+
+    Parameters
+    ----------
+    lines : ndarray
+            of shape (n,3) of epipolar lines in standard form
+
+    pts : ndarray
+          of shape (n, 3) of homogeneous coordinates
+    """
+    num = np.abs(lines[:,0] * pts[:,0] + lines[:,1] * pts[:,1] + lines[:,2])
+    denom = np.sqrt(lines[:,0] ** 2 + lines[:,1] ** 2)
+    return num / denom
 
 def compute_reprojection_error(F, x, x1, index=None):
     """
@@ -40,35 +98,30 @@ def compute_reprojection_error(F, x, x1, index=None):
               n,1 vector of reprojection errors
     """
 
-    if x.shape[1] != 3:
-        x = make_homogeneous(x)
-    if x1.shape[1] != 3:
-        x1 = make_homogeneous(x1)
+    if not x.shape[1] == 3 or not x1.shape[1] == 3:
+        raise ValueError('The input points must be homogenous with shape (n,3)')
 
     if isinstance(x, (pd.Series, pd.DataFrame)):
         x = x.values
     if isinstance(x1, (pd.Series, pd.DataFrame)):
         x1 = x1.values
 
-    # Normalize the vector
-    l1 = normalize_vector(F.dot(x.T))
-    l2 = normalize_vector(F.T.dot(x1.T))
+    # Compute the epipolar lines
+    lines1 = compute_epipolar_lines(F,x)
+    lines2 = compute_epipolar_lines(F.T, x1)
 
-    dist1 = np.sum(x1.T.conj() * l1, axis=0)
-    dist2 = np.sum(l2.conj() * x.T, axis=0)
-    F_error = np.sqrt(dist1**2 + dist2**2)
+    # Compute the euclidean distance from the pt to the line
+    d1 = epipolar_distance(lines2, x)
+    d2 = epipolar_distance(lines1, x1)
+
+    # Grab the max err from either reprojection
+    err = np.max(np.column_stack((d1,d2)), axis=1)
 
     if index is not None:
-        F_error = pd.Series(F_error, index=index)
+        err = pd.Series(err, index=index)
 
-    return F_error
+    return err
 
-    l_norms = normalize_vector(x.dot(F.T))
-    F_error = np.abs(np.sum(l_norms * x1, axis=1))
-
-    if index:
-        F_error = pd.Series(F_error, index=index)
-    return F_error
 
 def compute_fundamental_error(F, x, x1):
     """
@@ -212,6 +265,14 @@ def compute_fundamental_matrix(kp1, kp2, method='mle', reproj_threshold=2.0,
     confidence : float
                  [0, 1] that the estimated matrix is correct
 
+    Returns
+    -------
+    F : ndarray
+        A 3x3 fundamental matrix
+
+    mask : pd.Series
+           A boolean mask identifying those points that are valid.
+
     Notes
     -----
     While the method is user definable, if the number of input points
@@ -238,8 +299,9 @@ def compute_fundamental_matrix(kp1, kp2, method='mle', reproj_threshold=2.0,
                                      method_,
                                      param1=reproj_threshold,
                                      param2=confidence)
-
-
+    if F is None:
+        warnings.warn("F Computation Failed.")
+        return None, None
     if F.shape != (3,3):
         warnings.warn('F computation fell back to 7-point algorithm, not setting F.')
         return None, None
@@ -267,7 +329,7 @@ def compute_fundamental_matrix(kp1, kp2, method='mle', reproj_threshold=2.0,
         pt = kp1.loc[mask].T
         pt1 = kp2.loc[mask].T
 
-        if pt.shape[1] < 9 or pt1.shape[1] < 9:
+        if pt.shape[1] <=12 or pt1.shape[1] <=12:
             warnings.warn("Unable to apply MLE.  Not enough correspondences.  Returning with a RANSAC computed F matrix.")
             return F, mask
 

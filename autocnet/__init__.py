@@ -43,6 +43,9 @@ def cuda(enable=False, gpu=0):
             from autocnet.matcher.cuda_decompose import decompose_and_match
             Edge.decompose_and_match = decompose_and_match
 
+            from autocnet.matcher.cuda_outlier_detector import distance_ratio
+            Edge._ratio_check = staticmethod(distance_ratio)
+
         except Exception:
             warnings.warn('Failed to enable Cuda')
         return
@@ -56,5 +59,8 @@ def cuda(enable=False, gpu=0):
 
     from autocnet.matcher.cpu_decompose import decompose_and_match
     Edge.decompose_and_match = decompose_and_match
+
+    from autocnet.matcher.cpu_outlier_detector import  distance_ratio
+    Edge._ratio_check = staticmethod(distance_ratio)
 
 cuda()

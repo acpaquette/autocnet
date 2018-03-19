@@ -4,13 +4,13 @@ try:
     import cudasift as cs
 except:
     cs = None
-    
+
 def extract_features(array, nfeatures=None, **kwargs):
     """
     A custom docstring.
     """
     if not nfeatures:
-        nfeatures = int(max(array.shape) / 1.75)
+        nfeatures = int(max(array.shape) / 1.25)
     else:
         warnings.warn('NFeatures specified with the CudaSift implementation.  Please ensure the distribution of keypoints is what you expect.')
 

@@ -42,6 +42,11 @@ def clip_roi(img, center, img_size):
     x_stop = (x + i) - x_start
     y_stop = (y + i) - y_start
 
+    if x_start < 0:
+        x_start = 0
+    if y_start < 0:
+        y_start = 0
+
     if isinstance(img, np.ndarray):
         clipped_img = img[y_start:y_start + y_stop + 1,
                           x_start:x_start + x_stop + 1]

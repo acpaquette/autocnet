@@ -1,0 +1,34 @@
+name: root
+prefix: /opt/conda
+channels:
+  - conda-forge
+  - usgs-astrogeology
+  - menpo
+dependencies:
+  - python=3
+  - cython
+  - cyvlfeat
+  - matplotlib
+  - dill
+  - gdal
+  - geopandas
+  - jupyter
+  - networkx
+  - numexpr
+  - numpy
+  - opencv
+  - pandas
+  - plio
+  - pyyaml
+  - runipy
+  - scipy
+  - shapely
+  - sqlalchemy
+  - vlfeat
+  - pip:
+    - pillow
+    - protobuf
+    - pvl
+    - pysal
+    - pytest
+    - pytest-coverage

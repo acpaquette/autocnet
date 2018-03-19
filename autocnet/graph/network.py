@@ -34,7 +34,6 @@ MAXSIZE = {0: None,
            8: 12500,
            12: 15310}
 
-
 class CandidateGraph(nx.Graph):
     """
     A NetworkX derived directed graph to store candidate overlap images.
@@ -56,50 +55,46 @@ class CandidateGraph(nx.Graph):
          A control network object instantiated by calling generate_cnet.
     ----------
     """
-    edge_attr_dict_factory = Edge
-
     def __init__(self, *args, basepath=None, **kwargs):
-        # self.edge_attr_dict_factory = decorate_class(Edge, create_cg_updater(self), exclude=['clean', 'get_keypoints'])
         super(CandidateGraph, self).__init__(*args, **kwargs)
-        self.graph['node_counter'] = 0
-        node_labels = {}
-        self.graph['node_name_map'] = {}
-
-        for node_name in self.nodes():
-            image_name = os.path.basename(node_name)
-            image_path = node_name
-            # Replace the default attr dict with a Node object
-            self.node[node_name] = Node(image_name, image_path, self.graph['node_counter'])
-
-            # fill the dictionary used for relabelling nodes with relative path keys
-            node_labels[node_name] = self.graph['node_counter']
-            # fill the dictionary used for mapping base name to node index
-            self.graph['node_name_map'][self.node[node_name]['image_name']] = self.graph['node_counter']
-            self.graph['node_counter'] += 1
-
-        nx.relabel_nodes(self, node_labels, copy=False)
-
-        for s, d in self.edges():
-            if s > d:
-                s, d = d, s
-            e = self.edge[s][d]
-            e.source = self.node[s]
-            e.destination = self.node[d]
 
         self.graph['creationdate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
         self.graph['modifieddate'] = strftime("%Y-%m-%d %H:%M:%S", gmtime())
+        self.graph['node_name_map'] = {}
+        self.graph['node_counter'] = 0
+        for i, n in self.nodes(data=True):
+            if basepath:
+                image_path = os.path.join(basepath, i)
+            else:
+                image_path = i
+            n['data'] = Node(image_name=i, image_path=image_path, node_id = self.graph['node_counter'])
+
+            self.graph['node_name_map'][i] = self.graph['node_counter']
+            self.graph['node_counter'] += 1
+
+        # Relabel the nodes in place to use integer node ids
+        nx.relabel_nodes(self, self.graph['node_name_map'], copy=False)
+        for s, d, e in self.edges(data=True):
+            if s > d:
+                s,d = d,s
+            edge = Edge(self.nodes[s]['data'],self.nodes[d]['data'])
+            # Unidrected graph - both representation point at the same data
+            self.edges[s,d]['data'] = edge
+            self.edges[d,s]['data'] = edge
+
+        self.compute_overlaps()
 
     def __eq__(self, other):
         # Check the nodes
         if sorted(self.nodes()) != sorted(other.nodes()):
             return False
-        for n in self.nodes_iter():
-            if not self.node[n] == other.node[n]:
+        for node in self.nodes:
+            if not self.node[node] == other.node[node]:
                 return False
         if sorted(self.edges()) != sorted(other.edges()):
             return False
-        for s, d in self.edges_iter():
-            if not self.edge[s][d] == other.edge[s][d]:
+        for s, d, e in self.edges.data('data'):
+            if not e == other.edges[s,d]['data']:
                 return False
         return True
 
@@ -168,8 +163,7 @@ class CandidateGraph(nx.Graph):
                     adjacency_dict[j.file_name].append(i.file_name)
             except:
                 warnings.warn('Failed to calculate intersection between {} and {}'.format(i, j))
-
-        return cls(adjacency_dict)
+        return cls.from_adjacency(adjacency_dict)
 
     @classmethod
     def from_adjacency(cls, input_adjacency, basepath=None):
@@ -197,11 +191,7 @@ class CandidateGraph(nx.Graph):
         """
         if not isinstance(input_adjacency, dict):
             input_adjacency = io_json.read_json(input_adjacency)
-        if basepath is not None:
-            for k, v in input_adjacency.items():
-                input_adjacency[k] = [os.path.join(basepath, i) for i in v]
-                input_adjacency[os.path.join(basepath, k)] = input_adjacency.pop(k)
-        return cls(input_adjacency)
+        return cls(input_adjacency, basepath=basepath)
 
     @classmethod
     def from_save(cls, input_file):
@@ -229,11 +219,11 @@ class CandidateGraph(nx.Graph):
 
 
         """
-        return self.node[node_index]['image_name']
+        return self.node[node_index]['data']['image_name']
 
     def get_matches(self, clean_keys=[]):
         matches = []
-        for s, d, e in self.edges_iter(data=True):
+        for s, d, e in self.edges.data('edge'):
             match, _ = e.clean(clean_keys=clean_keys)
             match = match[['source_image', 'source_idx',
                            'destination_image', 'destination_idx']]
@@ -245,206 +235,91 @@ class CandidateGraph(nx.Graph):
             match = match.join(dkps, on='destination_idx')
             matches.append(match)
         return matches
-        
-    def add_image(self, image_name, adjacency=None, basepath=None, apply_func=None):
+
+    def add_node(self, n=None, **attr):
         """
         Adds an image node to the graph.
 
         Parameters
         ----------
         image_name : str
-                     The file name of or path to the image to add
+                     The file name of the node
 
-        adjacency : string or Node list
-                    The list of adjacent Nodes or image files for this image
-
+        adjacency : str list
+                    List of files names of adjacent images that correspond
+                    to names in CandidateGraph.graph["node_name_map"]
         basepath : str
-                   The directory path for the image
-
-        apply_func : function
-                     A static function that takes an Edge as its parameter
-                     Function will be applied to all Edges generated when adding
-                     the image
-
+                    The base path to the node image file
         """
 
-        def add_node(img_pth):
-            """
-            Adds a new, disconnected Node to the graph and returns a reference
-            to it
+        image_name = attr.pop("image_name", None)
+        adj = attr.pop("adjacency", None)
+        new_node = None
 
-            img_pth : The absolute path to the image
-
-            Returns
-            -------
-            Node : A reference to the added Node
-
-            """
-
-            # Check that image path exists
-            try:
-                assert os.path.exists(img_pth)
-            except AssertionError:
-                raise FileNotFoundError("Could not add {} to CandidateGraph; "
-                                        "File does not exist".format(img_pth))
-
-            # Grab the image name
-            img_nm = os.path.basename(img_pth)
-
-            # Get the node id & map [id -> Node] in the graph
-            id = self.graph['node_counter']
-            node = Node(img_nm, img_pth, id)
-            self.node[id] = node
-
-            # Map [image name -> id] in the graph and increment node counter
-            self.graph['node_name_map'][img_nm] = id
-            self.graph['node_counter'] += 1
-
-            # Return the Node reference
-            return node
-
-        # Check if image is already in the graph
-        if image_name in self.graph['node_name_map']:
-            warnings.warn("{} is already in the graph".format(image_name))
-            return
-
-        # Basepath resolution
-        if basepath:
-            image_path = os.path.join(basepath, image_name)
-        else:
-            image_path = image_name
-            image_name = os.path.basename(image_path)
-
-        # Create new node within graph
-        new_node = add_node(image_path)
-
-        # If adjacency supplied make sure it's the right type
-        if adjacency:
-            # Type check
-            try:
-                assert type(adjacency) is list
-            except AssertionError:
-                raise TypeError("Named parameter 'adjacency' must be a list of"
-                                "adjacent Node objects or list of adjacent "
-                                "images; Could not add {} to "
-                                "CandidateGraph".format(image_name))
-
-        # If adjacency not supplied, figure it out from footprints
-        else:
-            # Create empty adjacency list
-            adjacency = list()
-
-            # Make sure new node has valid footprint; If not, it will be a
-            # disconnected node on the graph
-            if not new_node.geodata.footprint or not \
-                    new_node.geodata.footprint.IsValid():
-                warnings.warn('Missing or invalid geospatial data for '
-                              '{0}; {0} will be added to the CandidateGraph'
-                              'as a disconnected Node'.format(image_name))
-                return
-
-            # Detect adjacency between our new node and the CG's nodes
-            target_nodes = [self.node[idx] for idx in self.nodes()]
-            valid_datasets = list()
-            datasets = [node.geodata for node in target_nodes]
-
-            # Make sure target nodes have valid footprints
-            for ds in datasets:
-                # Skip the source node if it's in the list of target nodes
-                if ds.file_name == new_node['image_path']:
-                    continue
-                # Grab footprints from nodes that have them
-                fp = ds.footprint
-                if fp and fp.IsValid():
-                    valid_datasets.append(ds)
-                else:
-                    warnings.warn('Missing or invalid geospatial data for '
-                                  '{}'.format(os.path.basename(ds.file_name)))
-
-            # Grab the footprints and test for intersection
-            for ds in valid_datasets:
-                ds_file_name = os.path.basename(ds.file_name)
-                try:
-                    if new_node.geodata.footprint.Intersects(ds.footprint):
-                        adjacency.append(ds_file_name)
-                except:
-                    warnings.warn('Failed to calculate intersection between {} '
-                                  'and {}'.format(image_name, ds_file_name))
-
-        # Build new edge(s) from adjacency
-        for a_img in adjacency:
-            # If string (image name)
-            if isinstance(a_img, str):
-                # If adjacent img is already in the graph
-                if a_img in self.graph['node_name_map'].keys():
-                    # Set the nodes for the new edge
-                    a_node_idx = self.graph['node_name_map'][a_img]
-                    s = self.node[a_node_idx]
-                    d = new_node
-
-                # If adjacent img isnt already in graph, add it
-                else:
-                    # Set the nodes for the new graph
-                    s = new_node
-                    d = add_node(os.path.join(basepath, a_img))
-            # If Node
-            elif isinstance(a_img, Node):
-                # If it's already in the graph, it'll be the source node,
-                # since its idx is lower than our new node
-                if a_img['image_name'] in [self.node[idx]['image_name'] for idx in self.nodes()]:
-                    s = a_img
-                    d = new_node
-                # Otherwise, can't create edge
-                else:
-                    warnings.warn("{0} is not in the graph; No Edge between"
-                                  "{0} and {1} can be "
-                                  "created".format(a_img['image_name'],
-                                                   image_name))
-                    continue
+        # If image name is provided, build the node from the image before
+        # calling nx.add_node()
+        if image_name is not None:
+            if "basepath" in attr.keys():
+                image_path = os.path.join(attr.pop("basepath"), image_name)
             else:
-                raise TypeError("Adjacency list contains Node objects or image "
-                                "names; Could not add {} to "
-                                "CandidateGraph".format(image_name))
+                image_path = image_name
+            if not os.path.exists(image_path):
+                warnings.warn("Cannot find {}".format(image_path))
+                return
+            n = self.graph["node_counter"]
+            self.graph["node_counter"] += 1
+            new_node = Node(image_name=image_name,
+                            image_path=image_path,
+                            node_id=n)
+            self.graph["node_name_map"][new_node["image_name"]] = new_node["node_id"]
+            attr["data"] = new_node
 
-            # Create the new edge
-            new_edge = Edge(s, d)
+        # Add the new node to the graph using networkx
+        super(CandidateGraph, self).add_node(n, **attr)
 
-            # If there's a clean func for the new edge, apply it
-            if apply_func:
-                ERR = "Named parameter 'apply_func' must be a static " \
-                      "function or list of static functions; These " \
-                      "function(s) are applied to all new edges generated " \
-                      "when adding {0}; Could not add {0} to " \
-                      "CandidateGraph".format(image_name)
-                # Type Check
-                try:
-                    assert callable(apply_func) or type(apply_func) is list
-                    # If it's a function, apply it
-                    if callable(apply_func):
-                        apply_func(new_edge)
-                    # If it's a list of functions, apply all of them
-                    else:
-                        [func(new_edge) for func in apply_func]
-                except AssertionError:
-                    raise TypeError(ERR)
+        # Populate adjacency, if provided
+        if new_node is not None and adj is not None:
+            for adj_img in adj:
+                if adj_img not in self.graph["node_name_map"].keys():
+                    warnings.warn("{} not found in the graph".format(adj_img))
+                    continue
+                new_idx = new_node["node_id"]
+                adj_idx = self.graph["node_name_map"][adj_img]
+                self.add_edge(adj_img, new_node["image_name"])
 
-            # Grab node ids
-            s_id = s['node_id']
-            d_id = d['node_id']
 
-            # Make sure source node is a key in the edge lookup
-            if s_id not in self.edge.keys():
-                self.edge[s_id] = dict()
+    def add_edge(self, u, v, **attr):
+        """
+        Adds an edge with the given src and dst nodes to the graph
 
-            # Add the new edge to the graph
-            self.edge[s_id][d_id] = new_edge
+        Parameters
+        ----------
+        u : str
+            The filename of the source image for the edge
+
+        v : Node
+            The filename of the destination image for the edge
+        """
+        if ("node_name_map" in self.graph.keys() and
+            u in self.graph["node_name_map"].keys() and
+            v in self.graph["node_name_map"].keys()):
+            # Grab node ids & create edge obj
+            s_id = self.graph["node_name_map"][u]
+            d_id = self.graph["node_name_map"][v]
+            new_edge = Edge(self.node[s_id]["data"], self.node[d_id]["data"])
+            # Prepare data for networkx
+            u = s_id
+            v = d_id
+            attr["data"] = new_edge
+        # Add the new edge to the graph using networkx
+        super(CandidateGraph, self).add_edge(u, v, **attr)
 
     def extract_features(self, band=1, *args, **kwargs):  # pragma: no cover
         """
         Extracts features from each image in the graph and uses the result to assign the
         node attributes for 'handle', 'image', 'keypoints', and 'descriptors'.
         """
-        for i, node in self.nodes_iter(data=True):
+        for i, node in self.nodes.data('data'):
             array = node.geodata.read_array(band=band)
             node.extract_features(array, *args, **kwargs),
 
@@ -461,14 +336,14 @@ class CandidateGraph(nx.Graph):
         downsample_amount : int
                             The amount of downsampling to apply to the image
         """
-        for i, node in self.nodes_iter(data=True):
+        for node in self.nodes:
             if downsample_amount == None:
                 total_size = node.geodata.raster_size[0] * node.geodata.raster_size[1]
                 downsample_amount = math.ceil(total_size / self.maxsize**2)
             node.extract_features_with_downsampling(downsample_amount, *args, **kwargs)
 
     def extract_features_with_tiling(self, tilesize=1000, overlap=500, *args, **kwargs): #pragma: no cover
-        for i, node in self.nodes_iter(data=True):
+        for node in self.nodes:
             print('Processing {}'.format(node['image_name']))
             node.extract_features_with_tiling(tilesize=tilesize, overlap=overlap, *args, **kwargs)
 
@@ -503,8 +378,8 @@ class CandidateGraph(nx.Graph):
                 of nodes to load features for.  If empty, load features
                 for all nodes
         """
-        for i, n in self.nodes_iter(data=True):
-            if nodes and not i in nodes:
+        for n in self.nodes:
+            if node['node_id'] not in nodes:
                 continue
             else:
                 n.load_features(in_path, **kwargs)
@@ -576,15 +451,15 @@ class CandidateGraph(nx.Graph):
         --------
         >>> g = CandidateGraph()
         >>> g.add_edges_from([(0,1), (0,2), (1,2), (0,3), (1,3), (2,3)])
-        >>> g.compute_triangular_cycles()
+        >>> sorted(g.compute_triangular_cycles())
         [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)]
         """
         cycles = []
-        for s, d in self.edges_iter():
-            for n in self.nodes():
-                if(s,n) in self.edges() and (d,n) in self.edges():
-                    cycles.append((s,d,n))
-        return cycles
+        for s, d in self.edges:
+            for n in self.nodes:
+                if(s,n) in self.edges and (d,n) in self.edges:
+                    cycles.append(tuple(sorted([s,d,n])))
+        return set(cycles)
 
     def minimum_spanning_tree(self):
         """
@@ -617,7 +492,7 @@ class CandidateGraph(nx.Graph):
         if callable(function):
             function = function.__name__
 
-        for s, d, edge in self.edges_iter(data=True):
+        for s, d, edge in self.edges.data('data'):
             try:
                 func = getattr(edge, function)
             except:
@@ -654,14 +529,14 @@ class CandidateGraph(nx.Graph):
                  keyword args to pass into function.
         """
         options = {
-            'edge' : self.edges_iter,
-            'edges' : self.edges_iter,
-            'e' : self.edges_iter,
-            0 : self.edges_iter,
-            'node' : self.nodes_iter,
-            'nodes' : self.nodes_iter,
-            'n' : self.nodes_iter,
-            1 : self.nodes_iter
+            'edge' : self.edges,
+            'edges' : self.edges,
+            'e' : self.edges,
+            0 : self.edges,
+            'node' : self.nodes,
+            'nodes' : self.nodes,
+            'n' : self.nodes,
+            1 : self.nodes
         }
 
         if not callable(function):
@@ -670,9 +545,9 @@ class CandidateGraph(nx.Graph):
         res = []
         obj = 1
         # We just want to the object, not the indices, so slcie appropriately
-        if options[on] == self.edges_iter:
+        if options[on] == self.edges:
             obj = 2
-        for elem in options[on](data=True):
+        for elem in options[on].data('data'):
             res.append(function(elem[obj], *args, **kwargs))
 
         if out: out=res
@@ -768,7 +643,7 @@ class CandidateGraph(nx.Graph):
                    A list where each entry is a string containing the full path to an image in the graph.
         """
         filelist = []
-        for i, node in self.nodes_iter(data=True):
+        for i, node in self.nodes.data('data'):
             filelist.append(node['image_path'])
         return filelist
 
@@ -822,15 +697,15 @@ class CandidateGraph(nx.Graph):
                   an ISIS3 compliant serial number or None
         """
         serials = {}
-        for i, n in self.nodes_iter(data=True):
-            serials[n['node_id']] = generate_serial_number(n['image_path'])
+        for n, node in self.nodes.data('data'):
+            serials[n] = generate_serial_number(node['image_path'])
         return serials
 
     def files(self):
         """
         Return a list of all full file PATHs in the CandidateGraph
         """
-        return [d['image_path'] for i, d in self.nodes_iter(data=True)]
+        return [node['image_path'] for node in self.nodes]
 
     def save(self, filename):
         """
@@ -876,67 +751,6 @@ class CandidateGraph(nx.Graph):
         """
         return cluster_plot(self, ax, **kwargs)
 
-    def create_edge_subgraph(self, edges):
-        """
-        Create a subgraph using a list of edges.
-        This is pulled directly from the networkx dev branch.
-
-        Parameters
-        ----------
-        edges : list
-                A list of edges in the form [(a,b), (c,d)] to retain
-                in the subgraph
-
-        Returns
-        -------
-        H : object
-            A networkx subgraph object
-        """
-        H = self.__class__()
-        adj = self.adj
-        # Filter out edges that don't correspond to nodes in the graph.
-        edges = ((u, v) for u, v in edges if u in adj and v in adj[u])
-        for u, v in edges:
-            # Copy the node attributes if they haven't been copied
-            # already.
-            if u not in H.node:
-                H.node[u] = self.node[u]
-            if v not in H.node:
-                H.node[v] = self.node[v]
-            # Create an entry in the adjacency dictionary for the
-            # nodes u and v if they don't exist yet.
-            if u not in H.adj:
-                H.adj[u] = H.adjlist_dict_factory()
-            if v not in H.adj:
-                H.adj[v] = H.adjlist_dict_factory()
-            # Copy the edge attributes.
-            H.edge[u][v] = self.edge[u][v]
-            # H.edge[v][u] = self.edge[v][u]
-        H.graph = self.graph
-        return H
-
-    def size(self, weight=None):
-        """
-        This replaces the built-in size method to properly
-        support Python 3 rounding.
-
-        Parameters
-        ----------
-        weight : string or None, optional (default=None)
-           The edge attribute that holds the numerical value used
-           as a weight.  If None, then each edge has weight 1.
-
-        Returns
-        -------
-        nedges : int
-            The number of edges or sum of edge weights in the graph.
-
-        """
-        if weight:
-            return sum(e[weight] for s, d, e in self.edges_iter(data=True))
-        else:
-            return len(self.edges())
-
     def create_node_subgraph(self, nodes):
         """
         Given a list of nodes, create a sub-graph and
@@ -957,25 +771,48 @@ class CandidateGraph(nx.Graph):
             A networkX graph object
 
         """
-        bunch = set(self.nbunch_iter(nodes))
-        # create new graph and copy subgraph into it
-        H = self.__class__()
+        induced_nodes = nx.filters.show_nodes(self.nbunch_iter(nodes))
+        return SubCandidateGraph(self, induced_nodes)
 
-        # copy node and attribute dictionaries
-        for n in bunch:
-            H.node[n] = self.node[n]
-        # namespace shortcuts for speed
-        H_adj = H.adj
-        self_adj = self.adj
-        for i in H.node:
-            adj_nodes = set(self.adj[i].keys()).intersection(bunch)
-            H.adj[i] = {}
-            for j, edge in self.adj[i].items():
-                if j in adj_nodes:
-                    H.adj[i][j] = edge
+    def create_edge_subgraph(self, edges):
+        """
+        Create a subgraph using a list of edges.
+        This is pulled directly from the networkx dev branch.
 
-        H.graph = self.graph
-        return H
+        Parameters
+        ----------
+        edges : list
+                A list of edges in the form [(a,b), (c,d)] to retain
+                in the subgraph
+
+        Returns
+        -------
+        H : object
+            A networkx subgraph object
+        """
+        return self.edge_subgraph(edges)
+
+    def size(self, weight=None):
+        """
+        This replaces the built-in size method to properly
+        support Python 3 rounding.
+
+        Parameters
+        ----------
+        weight : string or None, optional (default=None)
+           The edge attribute that holds the numerical value used
+           as a weight.  If None, then each edge has weight 1.
+
+        Returns
+        -------
+        nedges : int
+            The number of edges or sum of edge weights in the graph.
+
+        """
+        if weight:
+            return sum(e[weight] for s, d, e in self.edges.data('data'))
+        else:
+            return len(self.edges())
 
     def subgraph_from_matches(self):
         """
@@ -989,7 +826,7 @@ class CandidateGraph(nx.Graph):
         """
 
         # get all edges that have matches
-        matches = [(u, v) for u, v, edge in self.edges_iter(data=True)
+        matches = [(u, v) for u, v, edge in self.edges.data('data')
                    if not edge.matches.empty]
 
         return self.create_edge_subgraph(matches)
@@ -1009,7 +846,7 @@ class CandidateGraph(nx.Graph):
           A networkX graph object
 
         """
-        nodes = [n for n, d in self.nodes_iter(data=True) if func(d, *args, **kwargs)]
+        nodes = [node for i, node in self.nodes.data('data') if func(node, *args, **kwargs)]
         return self.create_node_subgraph(nodes)
 
     def filter_edges(self, func, *args, **kwargs):
@@ -1026,7 +863,7 @@ class CandidateGraph(nx.Graph):
         : Object
           A networkX graph object
         """
-        edges = [(u, v) for u, v, edge in self.edges_iter(data=True) if func(edge, *args, **kwargs)]
+        edges = [(u, v) for u, v, edge in self.edges.data('data') if func(edge, *args, **kwargs)]
         return self.create_edge_subgraph(edges)
 
     def compute_cliques(self, node_id=None):  # pragma: no cover
@@ -1064,10 +901,10 @@ class CandidateGraph(nx.Graph):
                      Strings used to apply masks to omit correspondences
         """
 
-        if not self.is_complete():
+        if not self.is_connected():
             warnings.warn('The given graph is not complete and may yield garbage.')
 
-        for s, d, edge in self.edges_iter(data=True):
+        for s, d, edge in self.edges.data('edge'):
             source_node = edge.source
             overlap, _ = self.compute_intersection(source_node, clean_keys = clean_keys)
 
@@ -1157,7 +994,7 @@ class CandidateGraph(nx.Graph):
                                overlap for all images in the source node.
         """
         if type(source) is int:
-            source = self.node[source]
+            source = self.node[source]['data']
         # May want to use a try except block here, but what error to raise?
         source_poly = swkt.loads(source.geodata.footprint.GetGeometryRef(0).ExportToWkt())
 
@@ -1167,7 +1004,7 @@ class CandidateGraph(nx.Graph):
         proj_poly_list = []
         proj_node_list = []
         # Begin iterating through the edges in the graph that include the source node
-        for s, d, edge in self.edges_iter(data=True):
+        for s, d, edge in self.edges.data('data'):
             if s == source['node_id']:
                 proj_poly = swkt.loads(edge.destination.geodata.footprint.GetGeometryRef(0).ExportToWkt())
                 proj_poly_list.append(proj_poly)
@@ -1199,17 +1036,14 @@ class CandidateGraph(nx.Graph):
         """
         Checks if the graph is a complete graph
         """
-        neighbors_dict = nx.degree(self)
-        for value in neighbors_dict.values():
-            if value == len(self.neighbors(self.nodes()[0])):
-                continue
-            else:
+        nneighbors = len(self) - 1
+        for n in self.nodes:
+            if self.degree(n) != nneighbors:
                 return False
-
         return True
 
     def footprints(self):
-        geoms = [n.footprint for i, n in self.nodes_iter(data=True)]
+        geoms = [node.footprint for i, node in self.nodes.data('data')]
         return gpd.GeoDataFrame(geometry=geoms)
 
     def create_control_network(self, clean_keys=[]):
@@ -1224,3 +1058,23 @@ class CandidateGraph(nx.Graph):
         serials = self.serials()
         files = self.files()
         self.controlnetwork.to_isis(outname, serials, files, *args, **kwargs)
+
+    def nodes_iter(self, data=False):
+        for i, n in self.nodes.data('data'):
+            if data:
+                yield i, n
+            else:
+                yield i
+
+    def edges_iter(self, data=False):
+        for s, d, e in self.edges.data('data'):
+            if data:
+                yield s, d, e
+            else:
+                yield s, d
+
+class SubCandidateGraph(nx.graphviews.SubGraph, CandidateGraph):
+    def __init__(self, *args, **kwargs):
+        super(SubCandidateGraph, self).__init__(*args, **kwargs)
+
+nx.graphviews.SubGraph = SubCandidateGraph

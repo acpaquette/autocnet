@@ -48,8 +48,8 @@ def save(network, projectname):
         js_str = json.dumps(js, cls=NumpyEncoder, sort_keys=True, indent=4)
         pzip.writestr('graph.json', js_str)
 
-        # Write the array node_attributes to hdf
-        for n, data in network.nodes_iter(data=True):
+        # Write the array node_attributes
+        for n, data in network.nodes.data('data'):
             ndarrays_to_write = {}
             for k, v in data.__dict__.items():
                 if isinstance(v, np.ndarray):
@@ -64,7 +64,7 @@ def save(network, projectname):
             os.remove('{}.npz'.format(data['node_id']))
 
         # Write the array edge attributes to hdf
-        for s, d, data in network.edges_iter(data=True):
+        for s, d, data in network.edges.data('data'):
             if s > d:
                 s, d = d, s
             ndarrays_to_write = {}
@@ -95,7 +95,6 @@ def load(projectname):
         # Read the graph object
         with pzip.open('graph.json', 'r') as g:
             data = json.loads(g.read().decode(),object_hook=json_numpy_obj_hook)
-
         cg = autocnet.graph.network.CandidateGraph()
         Edge = autocnet.graph.edge.Edge
         Node = autocnet.graph.node.Node
@@ -103,6 +102,9 @@ def load(projectname):
         cg.graph = data['graph']
         # Handle nodes
         for d in data['nodes']:
+            # Backwards compatible with nx 1.x proj files (64_apollo in examples)
+            if 'data' in d.keys():
+                d = d['data']
             n = Node()
             for k, v in d.items():
                 if k == 'id':
@@ -115,28 +117,34 @@ def load(projectname):
                 n.masks = pd.DataFrame(nzf['masks'], index=nzf['masks_idx'], columns=nzf['masks_columns'])
             except:
                 pass  # The node does not have features to load.
-            cg.add_node(d['node_id'])
-            cg.node[d['node_id']] = n
+            cg.add_node(d['node_id'], data=n)
 
         for e in data['links']:
-            cg.add_edge(e['source'], e['target'])
-            edge = Edge()
-            edge.source = cg.node[e['source']]
-            edge.destination = cg.node[e['target']]
-
-            for k, v in e.items():
+            s = e['source']
+            d = e['target']
+            if s > d:
+                s,d = d,s
+            source = cg.node[s]['data']
+            destination = cg.node[d]['data']
+            edge = Edge(source, destination)
+            # Backwards compatible with nx 1.x proj files (64_apollo in examples)
+            if 'data' in e.keys():
+                di = e['data']
+            else:
+                di = e
+            # Read the data and populate edge attrs
+            for k, v in di.items():
                 if k == 'target' or k == 'source':
                     continue
                 edge[k] = v
-
             try:
-                nzf = np.load(BytesIO(pzip.read('{}_{}.npz'.format(e['source'], e['target']))))
+                nzf = np.load(BytesIO(pzip.read('{}_{}.npz'.format(s,d))))
                 edge.masks = pd.DataFrame(nzf['masks'], index=nzf['masks_idx'], columns=nzf['masks_columns'])
                 edge.matches = pd.DataFrame(nzf['matches'], index=nzf['matches_idx'], columns=nzf['matches_columns'])
             except:
                 pass
             # Add a mock edge
-            cg.edge[e['source']][e['target']] = edge
+            cg.add_edge(s, d, data=edge)
 
         cg._order_adjacency
     return cg

@@ -1,12 +1,40 @@
+import warnings
 import networkx as nx
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
 
+from autocnet.matcher import subpixel as sp
+
 from plio.io.io_controlnetwork import to_isis, write_filelist
 from autocnet.matcher.deepen_funcs import dist_to_epipolar
 
+def subpixel_match(cg, cn,threshold=0.9, template_size=19, search_size=53, max_x_shift=1.0,max_y_shift=1.0, **kwargs):
+
+    def subpixel_group(group, threshold=0.9, template_size=19, search_size=53, max_x_shift=1.0,max_y_shift=1.0, **kwargs):
+        offs = []
+        for i,(idx, r) in enumerate(group.iterrows()):
+            if i == 0:
+                x = r.x
+                y = r.y
+                offs.append([0,0, np.inf])
+                continue
+
+            e = r.edge
+            s_img = cg.edge[e[0]][e[1]].source.geodata
+            s_template = sp.clip_roi(s_img, (x, y), template_size)
+            #s_template = cv2.Canny(bytescale(s_template), 50,100) # Canny - bad idea
+            d_img = cg.edge[e[0]][e[1]].destination.geodata
+            d_search = sp.clip_roi(d_img, (r.x, r.y), search_size)
+            #d_search = cv2.Canny(bytescale(d_search), 50,100)
+
+            xoff,yoff,corr = sp.subpixel_offset(s_template, d_search, **kwargs)
+            offs.append([xoff,yoff,corr])
+        df = pd.DataFrame(offs, columns=['x_off', 'y_off', 'corr'], index=group.index)
+        return df
+    gps = cn.data.groupby('point_id').apply(subpixel_group,threshold=0.9,max_x_shift=5, max_y_shift=5,template_size=template_size, search_size=search_size,**kwargs)
+    cn.data[['x_off', 'y_off', 'corr']] = gps.reset_index()[['x_off', 'y_off', 'corr']]
 
 def identify_potential_overlaps(cg, cn, overlap=True):
     """
@@ -55,7 +83,7 @@ def identify_potential_overlaps(cg, cn, overlap=True):
         # Determine whether a 'real' lat/lon are to be used and reproject
         if overlap:
             row = p.iloc[0]
-            lat, lon = cg.node[row.image_index].geodata.pixel_to_latlon(row.x, row.y)
+            lat, lon = cg.node[row.image_index]['data'].geodata.pixel_to_latlon(row.x, row.y)
         else:
             lat, lon = 0,0
 
@@ -212,7 +240,7 @@ def find_match(keypoint_idx, keypoints, edge, source, destination, dist, func, *
 
 
 class ControlNetwork(object):
-    measures_keys = ['point_id', 'image_index', 'keypoint_index', 'edge', 'match_idx', 'x', 'y']
+    measures_keys = ['point_id', 'image_index', 'keypoint_index', 'edge', 'match_idx', 'x', 'y', 'x_off', 'y_off', 'corr', 'valid']
 
     def __init__(self):
         self._point_id = 0
@@ -268,8 +296,13 @@ class ControlNetwork(object):
         # The node_id is a composite key (image_id, correspondence_id), so just grab the image
         image_id = key[0]
         match_id = key[1]
-        self.data.loc[self._measure_id] = [point_id, image_id, match_id, edge, match_idx, *fields]
+        self.data.loc[self._measure_id] = [point_id, image_id, match_id, edge, match_idx, *fields, 0, 0, np.inf, True]
         self._measure_id += 1
+
+    def remove_measure(self, idx):
+        self.data = self.data.drop(self.data.index[idx])
+        for r in idx:
+            self.measure_to_point.pop(r, None)
 
     def validate_points(self):
         """
@@ -286,13 +319,19 @@ class ControlNetwork(object):
         """
 
         def func(g):
-            print(g)
             # One and only one measure constraint
-            if not g.image_index.duplicated().any():
+            if g.image_index.duplicated().any():
                 return True
             else: return False
-
         return self.data.groupby('point_id').apply(func)
+
+    def clean_singles(self):
+        """
+        Take the `data` dataframe and return only those points with
+        at least two measures.  This is automatically called before writing
+        as functions such as subpixel matching can result in orphaned measures.
+        """
+        return self.data.groupby('point_id').apply(lambda g: g if len(g) > 1 else None)
 
     def to_isis(self, outname, serials, olist, *args, **kwargs): #pragma: no cover
         """
@@ -303,8 +342,17 @@ class ControlNetwork(object):
             warnings.warn('Control Network is not ISIS3 compliant.  Please run the validate_points method on the control network.')
             return
 
-        to_isis(outname + '.net', self.data, serials, *args, **kwargs)
+        # Apply the subpixel shift
+        self.data.x += self.data.x_off
+        self.data.y += self.data.y_off
+
+        to_isis(outname + '.net', self.data.query('valid == True'),
+                serials, *args, **kwargs)
         write_filelist(olist, outname + '.lis')
+
+        # Back out the subpixel shift
+        self.data.x -= self.data.x_off
+        self.data.y -= self.data.y_off
 
     def to_bal(self):
         """

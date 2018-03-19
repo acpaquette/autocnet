@@ -1,3 +1,4 @@
+language: generic  # Since we use conda, just go generic
 sudo: false
 
 branches:
@@ -7,28 +8,22 @@ only:
 env:
   global:
     - BINSTAR_USER: jlaura
-  matrix:
-    - PYTHON_VERSION: 3.5
 
 os:
   - linux
   - osx
 
-install:
+env:
+  - PYTHON_VERSION=3.5
+  - PYTHON_VERSION=3.6
+
+before_install:
   # We do this conditionally because it saves us some downloading if the
   # version is the same.
   - if [ "$TRAVIS_OS_NAME" == "linux" ]; then
-      if [ "$PYTHON_VERSION" == 2.7 ]; then
-        wget https://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh;
-      else
-        wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-      fi
+      wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
     else
-      if ["$PYTHON_VERSION" == 2.7]; then
-        curl -o miniconda.sh  https://repo.continuum.io/miniconda/Miniconda-latest-MacOSX-x86_64.sh;
-      else
-        curl -o miniconda.sh  https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh;
-      fi
+      curl -o miniconda.sh  https://repo.continuum.io/miniconda/Miniconda3-latest-MacOSX-x86_64.sh;
     fi
   - bash miniconda.sh -b -p $HOME/miniconda
   - export PATH="$HOME/miniconda/bin:$PATH"
@@ -37,40 +32,35 @@ install:
   - conda update -q conda
   # Useful for debugging any issues with conda
   - conda info -a
+  # Create the env
+  - conda create -q -n test python=$PYTHON_VERSION
+  - source activate test
 
   # Install dependencies
   - conda config --add channels conda-forge
   - conda config --add channels menpo
-  - conda config --add channels jlaura
+  - conda config --add channels usgs-astrogeology
   - conda config --set ssl_verify false
-  - conda install python=$PYTHON_VERSION
-  - conda install -c conda-forge numpy opencv
-  - conda install -c jlaura plio
   - conda install -c conda-forge vlfeat
   - conda install -c menpo cyvlfeat
   - pip install pillow pysal
-  - conda install scipy networkx numexpr dill cython pyyaml matplotlib runipy geopandas
+  - conda install -c conda-forge scipy networkx numexpr dill cython pyyaml matplotlib runipy geopandas opencv numpy gdal
+  - conda install -c usgs-astrogeology plio
 
   # Development installation
   - conda install pytest pytest-cov coverage sh anaconda-client
   - pip install coveralls
 
-    # Straight from the menpo team
-  - if [["$TRAVIS_OS_NAME" == "osx"]]; then
-      curl -o condaci.py https://raw.githubusercontent.com/menpo/condaci/v0.4.8/condaci.py;
-    else
-      wget https://raw.githubusercontent.com/menpo/condaci/v0.4.8/condaci.py -O condaci.py;
-    fi
-    # Build autocnet and push to anaconda cloud
-  - python condaci.py setup
-
 script:
   - pytest autocnet tests
 
 after_success:
-  # Upload to anaconda and push to coveralls
-  - ~/miniconda/bin/python condaci.py build ./conda
   - coveralls
+  # Need to do the build in the root
+  - source deactivate
+  - conda install conda-build anaconda-client
+  - conda config --set anaconda_upload yes
+  - conda build --token $CONDA_UPLOAD_TOKEN --python $PYTHON_VERSION recipe
 
 notifications:
   webhooks:

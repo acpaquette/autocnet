@@ -38,6 +38,8 @@ def compare_dicts(d, o):
     if o.keys() != d.keys():
         return False
     for k, v in d.items():
+        if v is None and o[k] is not None:
+            return False
         if isinstance(v, pd.DataFrame):
             if not v.equals(o[k]):
                 return False

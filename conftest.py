@@ -7,18 +7,26 @@ import pytest
 
 from autocnet.control import control
 from autocnet.graph.network import CandidateGraph
+from autocnet.graph import edge, node
 from autocnet.graph.node import Node
 from plio.io.io_gdal import GeoDataset
 
 @pytest.fixture(scope='session')
 def candidategraph(node_a, node_b, node_c):
+    # TODO: Getting this fixture from the global conf is causing deepycopy
+    # to fail.  Why?
     cg = CandidateGraph()
 
     # Create a candidategraph object - we instantiate a real CandidateGraph to
     # have access of networkx functionality we do not want to test and then
     # mock all autocnet functionality to control test behavior.
-    edges = [(0,1), (0,2), (1,2)]
+    edges = [(0,1,{'data':edge.Edge(0,1)}),
+             (0,2,{'data':edge.Edge(0,2)}),
+             (1,2,{'data':edge.Edge(1,2)})]
+
     cg.add_edges_from(edges)
+
+
 
     match_indices = [([0,1,2,3,4,5,6,7], [0,1,2,3,4,5,6,7]),
                      ([0,1,2,3,4,5,8,9], [0,1,2,3,4,5,8,9]),
@@ -40,9 +48,9 @@ def candidategraph(node_a, node_b, node_c):
     cg.get_matches = MagicMock(return_value=matches)
 
     # Mock in the node objects onto the candidate graph
-    cg.node[0] = node_a
-    cg.node[1] = node_b
-    cg.node[2] = node_c
+    cg.node[0]['data'] = node_a
+    cg.node[1]['data'] = node_b
+    cg.node[2]['data'] = node_c
 
     return cg
 
@@ -86,38 +94,39 @@ def geodata_c():
 
 @pytest.fixture(scope='session')
 def controlnetwork_data():
-    df = pd.DataFrame([[0, 0.0, 0.0, (0.0, 1.0), 0, 0.0, 0.0],
-                             [0, 1.0, 0.0, (0.0, 1.0), 0, 0.0, 0.0],
-                             [1, 0.0, 1.0, (0.0, 1.0), 1, 0.0, 0.0],
-                             [1, 1.0, 1.0, (0.0, 1.0), 1, 0.0, 0.0],
-                             [2, 0.0, 2.0, (0.0, 1.0), 2, 0.0, 0.0],
-                             [2, 1.0, 2.0, (0.0, 1.0), 2, 0.0, 0.0],
-                             [3, 0.0, 3.0, (0.0, 1.0), 3, 0.0, 0.0],
-                             [3, 1.0, 3.0, (0.0, 1.0), 3, 0.0, 0.0],
-                             [4, 0.0, 4.0, (0.0, 1.0), 4, 0.0, 0.0],
-                             [4, 1.0, 4.0, (0.0, 1.0), 4, 0.0, 0.0],
-                             [5, 0.0, 5.0, (0.0, 1.0), 5, 0.0, 0.0],
-                             [5, 1.0, 5.0, (0.0, 1.0), 5, 0.0, 0.0],
-                             [6, 0.0, 6.0, (0.0, 1.0), 6, 0.0, 0.0],
-                             [6, 1.0, 6.0, (0.0, 1.0), 6, 0.0, 0.0],
-                             [7, 0.0, 7.0, (0.0, 1.0), 7, 0.0, 0.0],
-                             [7, 1.0, 7.0, (0.0, 1.0), 7, 0.0, 0.0],
-                             [0, 2.0, 0.0, (0.0, 2.0), 0, 0.0, 0.0],
-                             [1, 2.0, 1.0, (0.0, 2.0), 1, 0.0, 0.0],
-                             [2, 2.0, 2.0, (0.0, 2.0), 2, 0.0, 0.0],
-                             [3, 2.0, 3.0, (0.0, 2.0), 3, 0.0, 0.0],
-                             [4, 2.0, 4.0, (0.0, 2.0), 4, 0.0, 0.0],
-                             [5, 2.0, 5.0, (0.0, 2.0), 5, 0.0, 0.0],
-                             [8, 0.0, 8.0, (0.0, 2.0), 6, 0.0, 0.0],
-                             [8, 2.0, 8.0, (0.0, 2.0), 6, 0.0, 0.0],
-                             [9, 0.0, 9.0, (0.0, 2.0), 7, 0.0, 0.0],
-                             [9, 2.0, 9.0, (0.0, 2.0), 7, 0.0, 0.0],
-                             [10, 1.0, 8.0, (1.0, 2.0), 6, 0.0, 0.0],
-                             [10, 2.0, 6.0, (1.0, 2.0), 6, 0.0, 0.0],
-                             [11, 1.0, 9.0, (1.0, 2.0), 7, 0.0, 0.0],
-                             [11, 2.0, 7.0, (1.0, 2.0), 7, 0.0, 0.0]],
-                            columns=['point_id', 'image_index', 'keypoint_index',
-                                     'edge', 'match_idx', 'x', 'y'])
+    df = pd.DataFrame([[0, 0.0, 0.0, (0.0, 1.0), 0, 0.0, 0.0, 0, 0, np.inf, True],
+                       [0, 1.0, 0.0, (0.0, 1.0), 0, 0.0, 0.0, 0, 0, np.inf, True],
+                       [1, 0.0, 1.0, (0.0, 1.0), 1, 0.0, 0.0, 0, 0, np.inf, True],
+                       [1, 1.0, 1.0, (0.0, 1.0), 1, 0.0, 0.0, 0, 0, np.inf, True],
+                       [2, 0.0, 2.0, (0.0, 1.0), 2, 0.0, 0.0, 0, 0, np.inf, True],
+                       [2, 1.0, 2.0, (0.0, 1.0), 2, 0.0, 0.0, 0, 0, np.inf, True],
+                       [3, 0.0, 3.0, (0.0, 1.0), 3, 0.0, 0.0, 0, 0, np.inf, True],
+                       [3, 1.0, 3.0, (0.0, 1.0), 3, 0.0, 0.0, 0, 0, np.inf, True],
+                       [4, 0.0, 4.0, (0.0, 1.0), 4, 0.0, 0.0, 0, 0, np.inf, True],
+                       [4, 1.0, 4.0, (0.0, 1.0), 4, 0.0, 0.0, 0, 0, np.inf, True],
+                       [5, 0.0, 5.0, (0.0, 1.0), 5, 0.0, 0.0, 0, 0, np.inf, True],
+                       [5, 1.0, 5.0, (0.0, 1.0), 5, 0.0, 0.0, 0, 0, np.inf, True],
+                       [6, 0.0, 6.0, (0.0, 1.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [6, 1.0, 6.0, (0.0, 1.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [7, 0.0, 7.0, (0.0, 1.0), 7, 0.0, 0.0, 0, 0, np.inf, True],
+                       [7, 1.0, 7.0, (0.0, 1.0), 7, 0.0, 0.0, 0, 0, np.inf, True],
+                       [0, 2.0, 0.0, (0.0, 2.0), 0, 0.0, 0.0, 0, 0, np.inf, True],
+                       [1, 2.0, 1.0, (0.0, 2.0), 1, 0.0, 0.0, 0, 0, np.inf, True],
+                       [2, 2.0, 2.0, (0.0, 2.0), 2, 0.0, 0.0, 0, 0, np.inf, True],
+                       [3, 2.0, 3.0, (0.0, 2.0), 3, 0.0, 0.0, 0, 0, np.inf, True],
+                       [4, 2.0, 4.0, (0.0, 2.0), 4, 0.0, 0.0, 0, 0, np.inf, True],
+                       [5, 2.0, 5.0, (0.0, 2.0), 5, 0.0, 0.0, 0, 0, np.inf, True],
+                       [8, 0.0, 8.0, (0.0, 2.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [8, 2.0, 8.0, (0.0, 2.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [9, 0.0, 9.0, (0.0, 2.0), 7, 0.0, 0.0, 0, 0, np.inf, True],
+                       [9, 2.0, 9.0, (0.0, 2.0), 7, 0.0, 0.0, 0, 0, np.inf, True],
+                       [10, 1.0, 8.0, (1.0, 2.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [10, 2.0, 6.0, (1.0, 2.0), 6, 0.0, 0.0, 0, 0, np.inf, True],
+                       [11, 1.0, 9.0, (1.0, 2.0), 7, 0.0, 0.0, 0, 0, np.inf, True],
+                       [11, 2.0, 7.0, (1.0, 2.0), 7, 0.0, 0.0, 0, 0, np.inf, True]],
+                       columns=['point_id', 'image_index', 'keypoint_index',
+                                'edge', 'match_idx', 'x', 'y','x_off', 'y_off',
+                                'corr', 'valid'])
 
     df.index.name = 'measure_id'
 

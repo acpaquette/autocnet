@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 
-def distance_ratio(matches, ratio=0.8, single=False):
+def distance_ratio(edge, matches, ratio=0.8, single=False):
     """
     Compute and return a mask for a matches dataframe
     using Lowe's ratio test.  If keypoints have a single

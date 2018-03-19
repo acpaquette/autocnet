@@ -9,6 +9,15 @@ def test_save_project(tmpdir, candidategraph):
     candidategraph.save(path.strpath)
     candidategraph2 = load(path.strpath)
 
+    for i,n in candidategraph.nodes.data('data'):
+        print('Node {}: {}'.format(i,n == candidategraph2.node[i]['data']))
+
+    for s,d,e in candidategraph.edges.data('data'):
+        print(type(candidategraph2.edges[s,d]), candidategraph2.edges[s,d].keys())
+        print('Edge {}: {}'.format((s,d), e == candidategraph2.edges[s,d]['data']))
+        e1 = candidategraph2.edges[s,d]['data']
+        print(e.keys())
+        print(e1.keys())
     assert candidategraph == candidategraph2
 
 def test_save_features(tmpdir, candidategraph):
@@ -17,4 +26,4 @@ def test_save_features(tmpdir, candidategraph):
 
     d = np.load(path.strpath + '_0.npz')
     np.testing.assert_array_equal(d['descriptors'],
-                                         candidategraph.node[0].descriptors)
+                                         candidategraph.node[0]['data'].descriptors)

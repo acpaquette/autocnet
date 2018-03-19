@@ -78,10 +78,6 @@ def match(edge, k=2, **kwargs):
 
     fl = FlannMatcher()
 
-    # Reset the edge.masks attrib; New matches would mean masks have to be
-    # re-calculated
-    edge.masks = pd.DataFrame()
-    
     # Get the correct descriptors
     aidx = kwargs.pop('aidx', None)
     bidx = kwargs.pop('bidx', None)

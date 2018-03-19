@@ -19,6 +19,7 @@ from autocnet.transformation import homography as hm
 from autocnet.vis.graph_view import plot_edge, plot_node, plot_edge_decomposition
 from autocnet.cg import cg
 
+from plio.io.io_gdal import GeoDataset
 
 
 class Edge(dict, MutableMapping):
@@ -48,8 +49,10 @@ class Edge(dict, MutableMapping):
         self.masks = pd.DataFrame()
         self.subpixel_matches = pd.DataFrame()
         self['weights'] = {}
+
         self['source_mbr'] = None
         self['destin_mbr'] = None
+        self['overlap_latlon_coords'] = None
 
     def __repr__(self):
         return """
@@ -76,7 +79,11 @@ class Edge(dict, MutableMapping):
         k : int
             The number of neighbors to find
         """
-        Edge._match(self, k, **kwargs)
+        # Reset the edge masks because matching is happening (again)
+        self.masks = pd.DataFrame()
+        kwargs['aidx'] = self.get_keypoints('source', overlap=True).index
+        kwargs['bidx'] = self.get_keypoints('destination', overlap=True).index
+        Edge._match(self, k=k, **kwargs)
 
     @staticmethod
     def _match(edge, k=2, **kwargs):
@@ -111,11 +118,9 @@ class Edge(dict, MutableMapping):
                 "Cannot use overlap constraint, minimum bounding rectangles"
                 " have not been computed for one or more Nodes")
             return
-
         # Get overlapping keypts
         s_idx = self.get_keypoints(self.source, overlap=True).index
         d_idx = self.get_keypoints(self.destination, overlap=True).index
-
         # Create a mask from matches whose rows have both source idx &
         # dest idx in the overlapping keypts
         mask = pd.Series(False, index=self.matches.index)
@@ -128,7 +133,12 @@ class Edge(dict, MutableMapping):
 
     def ratio_check(self, clean_keys=[], maskname='ratio', **kwargs):
         matches, mask = self.clean(clean_keys)
-        self.masks[maskname] = od.distance_ratio(matches, **kwargs)
+        self.masks[maskname] = self._ratio_check(self, matches, **kwargs)
+
+    @staticmethod
+    def _ratio_check(edge, matches, **kwargs):
+        pass
+        #return.masks[maskname] = od.distance_ratio(matches, **kwargs)
 
     def compute_fundamental_matrix(self, clean_keys=[], maskname='fundamental', **kwargs):
         """
@@ -177,18 +187,14 @@ class Edge(dict, MutableMapping):
         keypts = node.get_keypoint_coordinates(index=index, homogeneous=homogeneous)
         # If we only want keypoints in the overlap
         if overlap:
+            if self.source == node:
+                mbr = self['source_mbr']
+            else:
+                mbr = self['destin_mbr']
             # Can't use overlap if we haven't computed MBRs
-            if not (self["source_mbr"] and self["destin_mbr"]):
-                warnings.warn(
-                    "Cannot use overlap constraint, minimum bounding rectangles"
-                    " have not been computed for one or more Nodes")
+            if mbr is None:
                 return keypts
-            # Create overlap's bounding polygon in pixel space
-            bounds_poly = node.reproject_geom(self.overlap_latlon_coords)
-            # Mask for node keypts based on bounding poly
-            overlap_mask = cg.geom_mask(node.keypoints, bounds_poly)
-            # Return masked keypts
-            return keypts[overlap_mask]
+            return keypts.query('x >= {} and x <= {} and y >= {} and y <= {}'.format(*mbr))
         return keypts
 
     @get_keypoints.register(str)
@@ -310,6 +316,7 @@ class Edge(dict, MutableMapping):
 
         source_image = (matches.iloc[0]['source_image'])
 
+        pts = []
         # for each edge, calculate this for each keypoint pair
         for i, (idx, row) in enumerate(matches.iterrows()):
             s_idx = int(row['source_idx'])
@@ -321,9 +328,12 @@ class Edge(dict, MutableMapping):
             # Get the template and search window
             s_template = sp.clip_roi(s_img, s_keypoint, template_size)
             d_search = sp.clip_roi(d_img, d_keypoint, search_size)
+            if 0 in s_template.shape or 0 in d_search.shape:
+                continue
             try:
-                x_offset, y_offset, strength = sp.subpixel_offset(s_template, d_search, **kwargs)
+                (x_offset, y_offset, strength),ref = sp.subpixel_offset(s_template, d_search, **kwargs)
                 self.subpixel_matches.loc[idx, ('x_offset', 'y_offset', 'correlation', 'reference')]= [x_offset, y_offset, strength, source_image]
+                pts.append([s_template, d_search, ref, x_offset, y_offset])
             except:
                 warnings.warn('Template-Search size mismatch, failing for this correspondence point.')
 
@@ -341,6 +351,7 @@ class Edge(dict, MutableMapping):
         self.masks['shift'] = shift_mask
         self.masks['threshold'] = threshold_mask
         self.masks['subpixel'] = mask
+        return pts
 
     def suppress(self, suppression_func=spf.correlation, clean_keys=[], maskname='suppression', **kwargs):
         """
@@ -497,24 +508,43 @@ class Edge(dict, MutableMapping):
         voronoi = cg.vor(self, clean_keys, **kwargs)
         self.matches = pd.concat([self.matches, voronoi[1]['vor_weights']], axis=1)
 
-    def compute_overlap(self, **kwargs):
+    def compute_overlap(self, buffer_dist=0, **kwargs):
         """
         Estimate a source and destination minimum bounding rectangle, in
-        pixel space
+        pixel space.
         """
-        try:
-            self.overlap_latlon_coords, self["source_mbr"], self["destin_mbr"] = self.source.geodata.compute_overlap(self.destination.geodata, **kwargs)
-        except Exception as e:
-            raise Exception("Overlap between {} and {} could not be "
-                            "computed: {}".format(self.source['image_name'],
-                                                  self.destination['image_name'],
-                                                  type(e)))
+        if not isinstance(self.source.geodata, GeoDataset):
+            smbr = None
+            dmbr = None
+        else:
+            try:
+                self['overlap_latlon_coords'], smbr, dmbr = self.source.geodata.compute_overlap(self.destination.geodata, **kwargs)
+                smbr = list(smbr)
+                dmbr = list(dmbr)
+                for i in range(4):
+                    if i % 2:
+                        buf = buffer_dist
+                    else:
+                        buf = -buffer_dist
+                    smbr[i] += buf
+                    dmbr[i] += buf
 
-    def get_matches(self): # pragma: no cover
+            except:
+                smbr = self.source.geodata.xy_extent
+                dmbr = self.source.geodata.xy_extent
+                warnings.warn("Overlap between {} and {} could not be "
+                                "computed.  Using the full image extents".format(self.source['image_name'],
+                                                      self.destination['image_name']))
+                smbr = [smbr[0][0], smbr[1][0], smbr[0][1], smbr[1][1]]
+                dmbr = [dmbr[0][0], dmbr[1][0], dmbr[0][1], dmbr[1][1]]
+        self['source_mbr'] = smbr
+        self['destin_mbr'] = dmbr
+
+    def get_matches(self, clean_keys=[]): # pragma: no cover
         if self.matches.empty:
             return pd.DataFrame()
 
-        match, _ = self.clean(clean_keys=list(self.masks.columns))
+        match, _ = self.clean(clean_keys=clean_keys)
         match = match[['source_image', 'source_idx',
                        'destination_image', 'destination_idx']]
         skps = self.get_keypoints('source', index=match.source_idx)
@@ -523,5 +553,4 @@ class Edge(dict, MutableMapping):
         dkps.columns = ['destination_x', 'destination_y']
         match = match.join(skps, on='source_idx')
         match = match.join(dkps, on='destination_idx')
-        matches.append(match)
-        return matches
+        return match

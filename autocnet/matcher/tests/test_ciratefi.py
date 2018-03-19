@@ -11,154 +11,164 @@ from autocnet.examples import get_path
 from autocnet.matcher import subpixel as sp
 from .. import ciratefi
 
+import pytest
 
-class TestCiratefi(unittest.TestCase):
+# Can be parameterized for more exhaustive tests
+upsampling = 10
+alpha = math.pi/2
+cifi_thresh = 90
+rafi_thresh = 90
+tefi_thresh = 100
+use_percentile = True
+radii = list(range(1, 3))
 
-    @classmethod
-    def setUpClass(cls):
-        img = imread(get_path('AS15-M-0298_SML.png'), flatten=True)
-        img_coord = (482.09783936, 652.40679932)
+@pytest.fixture
+def img():
+    return imread(get_path('AS15-M-0298_SML.png'), flatten=True)
 
-        cls.template = sp.clip_roi(img, img_coord, 5)
-        cls.template = rotate(cls.template, 90)
-        cls.template = imresize(cls.template, 1.)
+@pytest.fixture
+def img_coord():
+    return (482.09783936, 652.40679932)
 
-        cls.search = sp.clip_roi(img, img_coord, 21)
-        cls.search = rotate(cls.search, 0)
-        cls.search = imresize(cls.search, 1.)
+@pytest.fixture
+def template(img, img_coord):
+    template = sp.clip_roi(img, img_coord, 5)
+    template = rotate(template, 90)
+    template = imresize(template, 1.)
+    return template
 
-        cls.offset = (1, 1)
+@pytest.fixture
+def search(img, img_coord):
+    search = sp.clip_roi(img, img_coord, 21)
+    search = rotate(search, 0)
+    search = imresize(search, 1.)
+    return search
 
-        cls.offset_template = sp.clip_roi(img, np.add(img_coord, cls.offset), 5)
-        cls.offset_template = rotate(cls.offset_template, 0)
-        cls.offset_template = imresize(cls.offset_template, 1.)
+@pytest.fixture
+def offset_template(img, img_coord):
+    offset = (1, 1)
 
-        cls.search_center = [math.floor(cls.search.shape[0]/2),
-                             math.floor(cls.search.shape[1]/2)]
+    offset_template = sp.clip_roi(img, np.add(img_coord, offset), 5)
+    offset_template = rotate(offset_template, 0)
+    offset_template = imresize(offset_template, 1.)
 
-        cls.upsampling = 10
-        cls.alpha = math.pi/2
-        cls.cifi_thresh = 90
-        cls.rafi_thresh = 90
-        cls.tefi_thresh = 100
-        cls.use_percentile = True
-        cls.radii = list(range(1, 3))
+    return offset_template
 
-        cls.cifi_number_of_warnings = 2
-        cls.rafi_number_of_warnings = 2
+def test_cifi_radii_too_large(template, search):
+    # check all warnings
+    with pytest.warns(UserWarning):
+        ciratefi.cifi(template, search, 1.0, radii=[100], use_percentile=False)
 
-    def test_cifi(self):
-            # check all warnings
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                ciratefi.cifi(self.template, self.search, 1.0, radii=[100], use_percentile=False)
-                self.assertEqual(len(w), self.cifi_number_of_warnings)
+def test_cifi_bounds_error(template, search):
+    with pytest.raises(ValueError):
+        ciratefi.cifi(template, search, -1.1, use_percentile=False)
 
-            # Threshold out of bounds error
-            self.assertRaises(ValueError, ciratefi.cifi, self.template, self.search, -1.1, use_percentile=False)
-            # radii list empty/none error
-            self.assertRaises(ValueError, ciratefi.cifi, self.template, self.search, 90, radii=None)
-            # scales list empty/none error
-            self.assertRaises(ValueError, ciratefi.cifi, self.template, self.search, 90, scales=None)
-            # template is bigger than search error
-            self.assertRaises(ValueError, ciratefi.cifi, self.search, self.template, -1.1, use_percentile=False)
+def test_cifi_radii_none_error(template, search):
+    with pytest.raises(ValueError):
+        ciratefi.cifi(template, search, 90, radii=None)
 
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                pixels, scales = ciratefi.cifi(self.template, self.search, thresh=self.cifi_thresh,
-                                               radii=self.radii, use_percentile=True)
+def test_cifi_scales_none_error(template, search):
+    with pytest.raises(ValueError):
+        ciratefi.cifi(template, search, 90, scales=None)
 
-                self.assertEqual(len(w), 0)
+def test_cifi_template_too_large_error(template, search):
+    with pytest.raises(ValueError):
+        ciratefi.cifi(search,template, 90, scales=None)
 
-                self.assertEqual(self.search.shape, scales.shape)
-                self.assertIn((np.floor(self.search.shape[0]/2), np.floor(self.search.shape[1]/2)), pixels)
-                self.assertTrue(pixels.size in range(0, self.search.size))
+@pytest.mark.parametrize('cifi_thresh, radii', [(90,list(range(1, 3)))])
+def test_cifi(template, search, cifi_thresh, radii):
+    pixels, scales = ciratefi.cifi(template, search, thresh=cifi_thresh,
+                                   radii=radii, use_percentile=True)
 
-    def test_rafi(self):
+    assert search.shape == scales.shape
+    assert (np.floor(search.shape[0]/2), np.floor(search.shape[1]/2)) in pixels
+    assert pixels.size in range(0,search.size)
+
+
+def test_rafi_warning(template, search):
+    rafi_pixels = [(10, 10)]
+    rafi_scales = np.ones(search.shape, dtype=float)
+    with pytest.warns(UserWarning):
+        ciratefi.rafi(template, search, rafi_pixels,
+              rafi_scales, thresh=1, radii=[100],
+              use_percentile=False)
+
+def test_rafi_bounds_error(template, search):
+    rafi_pixels = [(10, 10)]
+    rafi_scales = np.ones(search.shape, dtype=float)
+    with pytest.raises(ValueError):
+        ciratefi.rafi(template, search, rafi_pixels, rafi_scales, -1.1, use_percentile=False)
+
+def test_rafi_radii_list_none_error(template, search):
+    rafi_pixels = [(10, 10)]
+    with pytest.raises(ValueError):
+        ciratefi.rafi(search, template, rafi_pixels, -1.1, radii=None)
+
+def test_rafi_pixel_list_error(template, search):
+    rafi_pixels = []
+    rafi_scales = np.ones(search.shape, dtype=float)
+    with pytest.raises(ValueError):
+        ciratefi.rafi(template, search, rafi_pixels, rafi_scales)
+
+def test_rafi_scales_list_error(template, search):
+    rafi_pixels = [(10, 10)]
+    with pytest.raises(ValueError):
+        ciratefi.rafi(template, search, rafi_pixels, None)
+
+def test_rafi_template_bigger_error(template, search):
+    rafi_pixels = [(10, 10)]
+    rafi_scales = np.ones(search.shape, dtype=float)
+    with pytest.raises(ValueError):
+        ciratefi.rafi(search, template, rafi_pixels,rafi_scales)
+
+def test_rafi_shape_mismatch(template, search):
         rafi_pixels = [(10, 10)]
+        rafi_scales = np.ones(search.shape, dtype=float)[:10]
+        with pytest.raises(ValueError):
+            ciratefi.rafi(template, search, rafi_pixels, rafi_scales)
 
-        rafi_scales = np.ones(self.search.shape, dtype=float)
+@pytest.mark.parametrize("rafi_thresh, radii, alpha", [(90, list(range(1, 3)),math.pi/2)])
+def test_rafi(template, search, rafi_thresh, radii, alpha):
+    rafi_pixels = [(10, 10)]
+    rafi_scales = np.ones(search.shape, dtype=float)
+    pixels, scales = ciratefi.rafi(template, search, rafi_pixels, rafi_scales,
+                                   thresh=rafi_thresh, radii=radii, use_percentile=True,
+                                   alpha=alpha)
 
-        # check all warnings
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            ciratefi.rafi(self.template, self.search, rafi_pixels,
-                          rafi_scales, thresh=1, radii=[100],
-                          use_percentile=False)
+    assert (np.floor(search.shape[0]/2), np.floor(search.shape[1]/2)) in pixels
+    assert pixels.size in range(0, search.size)
 
-            self.assertEqual(len(w), self.rafi_number_of_warnings)
+# Alternate approach to the more verbose tests above - this tests all combinations
+@pytest.mark.parametrize("tefi_pixels", [[(10,10)], None])
+@pytest.mark.parametrize("tefi_scales", [np.ones(search(img(), img_coord()).shape, dtype=float),
+                                         None,
+                                         np.ones(search(img(), img_coord()).shape, dtype=float)[:10]])
+@pytest.mark.parametrize("tefi_angles", [[3.14159265], None])
+@pytest.mark.parametrize("thresh", [-1.1, 90])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_tefi_errors(template, search, tefi_pixels, tefi_scales, tefi_angles, thresh, reverse):
+    with pytest.raises(ValueError):
+        if reverse:
+            template, search = search, template
+        ciratefi.tefi(template, search, tefi_pixels, tefi_scales,
+                  tefi_angles, thresh=-1.1, use_percentile=False, alpha=math.pi/2)
 
-        # Threshold out of bounds error
-        self.assertRaises(ValueError, ciratefi.rafi, self.template, self.search, rafi_pixels, rafi_scales,
-                          -1.1, use_percentile=False)
+def test_tefi(template, search):
+    tefi_pixels = [(10, 10)]
+    tefi_scales = np.ones(search.shape, dtype=float)
+    tefi_angles = [3.14159265]
 
-        # Radii list is empty.None error
-        self.assertRaises(ValueError, ciratefi.rafi, self.search, self.template, rafi_pixels, -1.1, radii=None)
-        # candidate pixel list empty/none error
-        self.assertRaises(ValueError, ciratefi.rafi, self.template, self.search, [], rafi_scales)
-        # scales list empty/none error
-        self.assertRaises(ValueError, ciratefi.rafi, self.template, self.search, rafi_pixels, None)
-        # template is bigger than search error
-        self.assertRaises(ValueError, ciratefi.rafi, self.search, self.template, rafi_pixels, rafi_scales)
-        # best scale nd array is not equal image shape
-        self.assertRaises(ValueError, ciratefi.rafi, self.template, self.search, rafi_pixels, rafi_scales[:10])
+    pixel = ciratefi.tefi(template, search, tefi_pixels, tefi_scales, tefi_angles,
+                                   thresh=tefi_thresh, use_percentile=True, alpha=math.pi/2,
+                                   upsampling=10)
 
-        with warnings.catch_warnings(record=True) as w:
-            pixels, scales = ciratefi.rafi(self.template, self.search, rafi_pixels, rafi_scales,
-                                           thresh=self.rafi_thresh, radii=self.radii, use_percentile=True,
-                                           alpha=self.alpha)
-            self.assertEqual(len(w), 0)
+    assert np.equal((.5, .5), (pixel[1], pixel[0])).all()
 
-            self.assertIn((np.floor(self.search.shape[0]/2), np.floor(self.search.shape[1]/2)), pixels)
-            self.assertTrue(pixels.size in range(0, self.search.size))
+@pytest.mark.parametrize("cifi_thresh, rafi_thresh, tefi_thresh, alpha, radii",[(90,90,100,math.pi/2,list(range(1, 3)))])
+def test_ciratefi(template, search, cifi_thresh, rafi_thresh, tefi_thresh, alpha, radii):
+    results = ciratefi.ciratefi(template, search, upsampling=10, cifi_thresh=cifi_thresh,
+                                rafi_thresh=rafi_thresh, tefi_thresh=tefi_thresh,
+                                use_percentile=True, alpha=alpha, radii=radii)
 
-    def test_tefi(self):
-        tefi_pixels = [(10, 10)]
-        tefi_scales = np.ones(self.search.shape, dtype=float)
-        tefi_angles = [3.14159265]
-
-        # Threshold out of bounds error
-        self.assertRaises(ValueError, ciratefi.tefi, self.template, self.search, tefi_pixels, tefi_scales,
-                          tefi_angles, thresh=-1.1, use_percentile=False, alpha=self.alpha)
-
-        # angle list is empty/None error
-        self.assertRaises(ValueError, ciratefi.tefi, self.search, self.template, tefi_pixels, tefi_scales, None)
-        # candidate pixel list empty/none error
-        self.assertRaises(ValueError, ciratefi.tefi, self.template, self.search, None, tefi_scales, tefi_angles)
-        # scales list empty/none error
-        self.assertRaises(ValueError, ciratefi.tefi, self.template, self.search, tefi_pixels, None, tefi_angles)
-        # template is bigger than search error
-        self.assertRaises(ValueError, ciratefi.tefi, self.search, self.template, tefi_pixels, tefi_scales, -1.1)
-        # best scale nd array is smaller than number of candidate pixels
-        self.assertRaises(ValueError, ciratefi.tefi, self.template, self.search, tefi_pixels, tefi_scales[:10], -1.1)
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            pixel = ciratefi.tefi(self.template, self.search, tefi_pixels, tefi_scales, tefi_angles,
-                                           thresh=self.tefi_thresh, use_percentile=True, alpha=self.alpha,
-                                           upsampling=self.upsampling)
-
-            for warn in w:
-                print(warn)
-
-            self.assertEqual(len(w), 0)
-            print(pixel)
-            self.assertTrue(np.equal((.5, .5), (pixel[1], pixel[0])).all())
-
-    def test_ciratefi(self):
-        results = ciratefi.ciratefi(self.template, self.search, upsampling=10, cifi_thresh=self.cifi_thresh,
-                                    rafi_thresh=self.rafi_thresh, tefi_thresh=self.tefi_thresh,
-                                    use_percentile=self.use_percentile, alpha=self.alpha, radii=self.radii)
-
-        self.assertEqual(len(results), 3)
-        self.assertTrue((np.array(results[1], results[0]) < 1).all())
-
-        results = ciratefi.ciratefi(self.offset_template, self.search, upsampling=self.upsampling,
-                                    cifi_thresh=self.cifi_thresh, rafi_thresh=self.rafi_thresh,
-                                    tefi_thresh=self.tefi_thresh,
-                                    use_percentile=self.use_percentile, alpha=self.alpha, radii=self.radii)
-
-
-
-    def tearDown(self):
-        pass
+    assert len(results) == 3
+    assert (np.array(results[1], results[0]) < 1).all()

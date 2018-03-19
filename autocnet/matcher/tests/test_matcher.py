@@ -52,37 +52,37 @@ class TestMatcher(unittest.TestCase):
         edges = list()
         from autocnet.matcher.cpu_matcher import match as match
         for s, d in cang.edges():
-            cang[s][d]._match = match
+            cang[s][d]['data']._match = match
             edges.append(cang[s][d])
 
         # Assert none of the edges have masks yet
         for edge in edges:
-            self.assertTrue(edge.masks.empty)
+            self.assertTrue(edge['data'].masks.empty)
 
         # Match & outlier detect
         cang.match()
         cang.symmetry_checks()
 
         # Grab the length of a matches df
-        match_len = len(edges[0].matches.index)
+        match_len = len(edges[0]['data'].matches.index)
 
         # Assert symmetry check is now in all edge masks
         for edge in edges:
-            self.assertTrue('symmetry' in edge.masks)
+            self.assertTrue('symmetry' in edge['data'].masks)
 
         # Assert matches have been populated
         for edge in edges:
-            self.assertTrue(not edge.matches.empty)
+            self.assertTrue(not edge['data'].matches.empty)
 
         # Re-match
         cang.match()
 
         # Assert that new matches have been added on to old ones
-        self.assertEqual(len(edges[0].matches.index), match_len * 2)
+        self.assertEqual(len(edges[0]['data'].matches.index), match_len * 2)
 
         # Assert that the match cleared the masks df
         for edge in edges:
-            self.assertTrue(edge.masks.empty)
+            self.assertTrue(edge['data'].masks.empty)
 
 
     def tearDown(self):

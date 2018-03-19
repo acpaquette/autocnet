@@ -49,21 +49,21 @@ class TestTwoImageMatching(unittest.TestCase):
 
         # Step: Extract image data and attribute nodes
         cg.extract_features(extractor_method='sift', extractor_parameters={"nfeatures":500})
-        for i, node in cg.nodes_iter(data=True):
+        for i, node in cg.nodes.data('data'):
             self.assertIn(node.nkeypoints, range(490, 510))
 
         # Step: Compute the coverage ratios
-        for i, node in cg.nodes_iter(data=True):
+        for i, node in cg.nodes.data('data'):
             ratio = node.coverage()
             self.assertTrue(0.93 < round(ratio, 8) < 0.96)
 
         cg.decompose_and_match(k=2, maxiteration=2)
-        self.assertTrue(isinstance(cg.edge[0][1].smembership, np.ndarray))
+        self.assertTrue(isinstance(cg.edges[0,1]['data'].smembership, np.ndarray))
 
         # Create fundamental matrix
         cg.compute_fundamental_matrices()
 
-        for s, d, e in cg.edges_iter(data=True):
+        for s, d, e in cg.edges.data('data'):
             assert isinstance(e['fundamental_matrix'], np.ndarray)
             err = e.compute_fundamental_error(clean_keys=['fundamental'])
             assert isinstance(err, pd.Series)

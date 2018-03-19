@@ -30,7 +30,7 @@ def candidategraph():
                           [True, False]],
                           columns=['rain', 'maker'])
 
-    for s, d, e in cg.edges_iter(data=True):
+    for s, d, e in cg.edges.data('data'):
         e['fundamental_matrix'] = np.random.random(size=(3,3))
         e.matches = matches
         e.masks = masks
@@ -44,7 +44,7 @@ def candidategraph():
     keypoints = pd.DataFrame(kps, columns=['x', 'y', 'response', 'size', 'angle',
                                            'octave', 'layer'])
 
-    for i, n in cg.nodes_iter(data=True):
+    for i, n in cg.nodes.data('data'):
         n.keypoints = keypoints
         n.descriptors = np.random.random(size=(3, 128))
         n.masks = masks

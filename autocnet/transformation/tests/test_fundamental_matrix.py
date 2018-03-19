@@ -104,19 +104,24 @@ class TestFundamentalMatrix(unittest.TestCase):
     def test_update_fundamental_mask(self):
         np.random.seed(12345)
         nbr_inliers = 20
-        fp = np.array(np.random.standard_normal((nbr_inliers, 2)))
-        tp = np.array(np.random.standard_normal((nbr_inliers, 2)))
+        
+        fp = np.ones((nbr_inliers, 3))
+        tp = np.ones((nbr_inliers, 3))
+        fp[:, :2] = np.array(np.random.standard_normal((nbr_inliers, 2)))
+        tp[:, :2] = np.array(np.random.standard_normal((nbr_inliers, 2)))
 
         F, mask = fm.compute_fundamental_matrix(fp, tp, method='ransac')
 
         new_mask = fm.update_fundamental_mask(F, fp, tp, threshold=0.5, method='reprojection')
-        self.assertEqual(8, new_mask['fundamental'].sum())
+        self.assertEqual(9, new_mask['fundamental'].sum())
 
     def test_update_fundamental_mask_with_index(self):
         np.random.seed(12345)
         nbr_inliers = 20
-        fp = np.array(np.random.standard_normal((nbr_inliers, 2)))
-        tp = np.array(np.random.standard_normal((nbr_inliers, 2)))
+        fp = np.ones((nbr_inliers, 3))
+        tp = np.ones((nbr_inliers, 3))
+        fp[:, :2] = np.array(np.random.standard_normal((nbr_inliers, 2)))
+        tp[:, :2] = np.array(np.random.standard_normal((nbr_inliers, 2)))
 
         F, mask = fm.compute_fundamental_matrix(fp, tp, method='ransac')
         new_index = np.arange(20)[::-1]  #Just reverse the index

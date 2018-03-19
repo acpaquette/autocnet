@@ -125,16 +125,12 @@ class TestEdge(unittest.TestCase):
 
         matches_df = pd.DataFrame(data=keypoint_matches, columns=['source_image', 'source_idx',
                                                                   'destination_image', 'destination_idx'])
-
-        e = edge.Edge()
-        source_node = node.Node()
-        destination_node = node.Node()
+        source_node = node.Node(node_id=0)
+        destination_node = node.Node(node_id=1)
+        e = edge.Edge(source_node, destination_node)
 
         source_node.get_keypoint_coordinates = MagicMock(return_value=src_keypoint_df)
         destination_node.get_keypoint_coordinates = MagicMock(return_value=dst_keypoint_df)
-
-        e.source = source_node
-        e.destination = destination_node
 
         e.clean = MagicMock(return_value=(matches_df, None))
         e.matches = matches_df
@@ -185,20 +181,22 @@ class TestEdge(unittest.TestCase):
         destination_node.keypoints = dst_keypoint_df
 
         # Only keep keypt vals w/I these bounding rects
-        e["source_mbr"] = (0, 2, 8, 5)
-        e["destin_mbr"] = (31, 33, 28, 26)
+        e["source_mbr"] = (0, 2, 5, 8)
+        e["destin_mbr"] = (31, 33, 26, 28)
 
         # Grab the keypoints on our MBR overlaps
         s_overlap = e.get_keypoints(e.source, overlap=True)
         d_overlap = e.get_keypoints(e.destination, overlap=True)
 
         # Assert masked src keypts coords are equal
-        s_expected = pd.DataFrame({'x': (1, 2, 3), 'y': (6, 7, 8)})
+        s_expected = pd.DataFrame({'x': (0, 1, 2), 'y': (5, 6, 7)})
         self.assertTrue(np.array_equal(s_expected['x'], s_overlap['x'].values))
         self.assertTrue(np.array_equal(s_expected['y'], s_overlap['y'].values))
 
         # Assert masked dst keypt coords are equal
         d_expected = pd.DataFrame({'x': (33, 32, 31), 'y': (28, 27, 26)})
+        print(d_expected['x'])
+        print(d_overlap['x'].values)
         self.assertTrue(np.array_equal(d_expected['x'], d_overlap['x'].values))
         self.assertTrue(np.array_equal(d_expected['y'], d_overlap['y'].values))
 
@@ -260,6 +258,10 @@ class TestEdge(unittest.TestCase):
         self.assertEqual(expected, e.__repr__())
 
     def test_ratio_check(self):
+        """
+        A pretty basic test that simply tests pass through from the edge to the
+        proper distance func.
+        """
         # Matches is init to None
         e = edge.Edge()
 
@@ -273,17 +275,15 @@ class TestEdge(unittest.TestCase):
         matches_df = pd.DataFrame(data=keypoint_matches, columns=['source_image', 'source_idx',
                                                                   'destination_image', 'destination_idx', 'distance'])
         e.matches = matches_df
-        expected = list(od.distance_ratio(matches_df))
+        expected = od.distance_ratio(None, matches_df)
         e.ratio_check()
-        self.assertEqual(expected, list(e.masks["ratio"]))
+        assert expected.equals(e.masks["ratio"])
 
     def test_overlap_check(self):
-        s = node.Node()
-        d = node.Node()
+        s = node.Node(node_id=0)
+        d = node.Node(node_id=1)
 
-        e = edge.Edge()
-        e.source = s
-        e.destination = d
+        e = edge.Edge(s, d)
 
         src_keypoint_df = pd.DataFrame({'x': (0, 1, 2, 3, 4), 'y': (5, 6, 7, 8, 9)})
         dst_keypoint_df = pd.DataFrame({'x': (34, 33, 32, 31, 30), 'y': (29, 28, 27, 26, 25)})
@@ -327,6 +327,5 @@ class TestEdge(unittest.TestCase):
         e["destin_mbr"] = (1, 1, 1, 1)
         e.overlap_check()
         overlap_matches, overlap_mask = e.clean(clean_keys=['overlap'])
-
         self.assertTrue(expected_mask.equals(overlap_mask))
         self.assertTrue(overlap_matches.equals(e.matches[overlap_mask]))

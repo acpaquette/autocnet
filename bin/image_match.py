@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.abspath('../autocnet'))
 
 from autocnet.utils.utils import find_in_dict
 from autocnet.graph.network import CandidateGraph
-from autocnet.fileio.io_controlnetwork import to_isis, write_filelist
-from autocnet.fileio.io_yaml import read_yaml
+#from autocnet.fileio.io_controlnetwork import to_isis, write_filelist
+#from autocnet.fileio.io_yaml import read_yaml
 
 
 def parse_arguments():

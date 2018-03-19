@@ -12,7 +12,7 @@ from .. import control
 def test_fromcandidategraph(candidategraph, controlnetwork_data):#, controlnetwork):
     matches = candidategraph.get_matches()
     cn = control.ControlNetwork.from_candidategraph(matches)
-    assert cn.data.equals(controlnetwork_data)
+    assert cn.data[['point_id', 'image_index']].equals(controlnetwork_data[['point_id', 'image_index']])
 
 def test_add_measure():
     cn = control.ControlNetwork()
@@ -36,11 +36,11 @@ def test_add_measure():
     assert cn.measure_to_point[key] == 0
 
 def test_validate_points(controlnetwork):
-    assert controlnetwork.validate_points().any()
+    assert not controlnetwork.validate_points().any()
 
 def test_bad_validate_points(bad_controlnetwork):
-    assert bad_controlnetwork.validate_points().iloc[0] == False
-    assert bad_controlnetwork.validate_points().iloc[1:].all()
+    assert bad_controlnetwork.validate_points().iloc[0] == True
+    assert not bad_controlnetwork.validate_points().iloc[1:].all()
 
 def test_identify_potential_overlaps(controlnetwork, candidategraph):
     res = control.identify_potential_overlaps(candidategraph,

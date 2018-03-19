@@ -30,7 +30,6 @@ def compute_epipoles(f):
 
     return e, e1
 
-<<<<<<< HEAD
 def compute_epipolar_line(keypoint, f_matrix):
     """
     Parameters
@@ -48,8 +47,6 @@ def compute_epipolar_line(keypoint, f_matrix):
     """
     return normalize_vector(keypoint.dot(f_matrix))
 
-=======
->>>>>>> 19c1336abe4aed2f6952c9986e2b718912b275d0
 def idealized_camera():
     """
     Create an idealized camera transformation matrix

@@ -40,11 +40,9 @@ def setup_package():
             'pyyaml',
             'plio',
             'pillow',
-            'pysal',
             'scipy',
             'networkx',
             'numexpr',
-            'dill',
             'cython',
             'matplotlib'],
         classifiers=[

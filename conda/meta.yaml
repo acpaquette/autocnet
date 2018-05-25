@@ -1,40 +1,42 @@
 package:
   name: autocnet-dev
   version: 0.1.0
-
+channels:
+  - conda-forge
 source:
-   #git_url: https://github.com/USGS-Astrogeology/autocnet.git
-   path: ../
+   git_url: https://github.com/USGS-Astrogeology/autocnet.git
+   #path: ../
 requirements:
   build:
-    - python
-    - plio
-    - opencv3
+    - python=3
     - vlfeat
     - cyvlfeat
     - pillow
-    - matplotlib
     - scipy
     - networkx
     - numexpr
     - cython
-    - pyyaml
-    - pysal
-
+    - matplotlib
+    - geopandas
+    - opencv3
+    - numpy
+    - plio
+    - gdal
   run:
-    - python
-    - plio
-    - opencv3
+    - python=3
     - vlfeat
     - cyvlfeat
     - pillow
-    - matplotlib
     - scipy
     - networkx
     - numexpr
     - cython
-    - pyyaml
-    - jupyter
+    - matplotlib
+    - geopandas
+    - opencv3
+    - numpy
+    - plio
+    - gdal
 
 test:
   imports:

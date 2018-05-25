@@ -81,7 +81,7 @@ def compare_dicts(d, o):
                 print(v, o[k])
                 return False
         elif isinstance(v, np.ndarray):
-            if not np.sum(np.abs(v - o[k])) < 0.01:
+            if not np.allclose(v, o[k]):
                 return False
         else:
             if k == '_geodata':
@@ -127,7 +127,7 @@ def normalize_vector(line):
     >>> x = np.array([3, 1, 2])
     >>> nv = normalize_vector(x)
     >>> print(np.round(nv, 6))  # For doc test float percision
-    [ 0.801784  0.267261  0.534522]
+    [0.801784 0.267261 0.534522]
     """
     if isinstance(line, pd.DataFrame):
         line = line.values

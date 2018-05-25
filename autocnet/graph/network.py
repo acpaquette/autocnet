@@ -200,7 +200,8 @@ class CandidateGraph(nx.Graph):
         [0, 1, 2, 3, 4, 5]
         """
         if not isinstance(input_adjacency, dict):
-            input_adjacency = io_json.read_json(input_adjacency)
+            path_to_adjacency = os.path.join(basepath, input_adjacency)
+            input_adjacency = io_json.read_json(path_to_adjacency)
         return cls(input_adjacency, basepath=basepath, node_id_map=node_id_map, **kwargs)
 
     @classmethod

@@ -49,7 +49,7 @@ class Edge(dict, MutableMapping):
         self.subpixel_matches = pd.DataFrame()
         self._matches = pd.DataFrame()
         self['weights'] = {}
-        
+
         self['source_mbr'] = None
         self['destin_mbr'] = None
         self['overlap_latlon_coords'] = None
@@ -77,7 +77,7 @@ class Edge(dict, MutableMapping):
             self._matches = value
         else:
             raise(TypeError)
-            
+
     def match(self, k=2, **kwargs):
 
         """
@@ -183,7 +183,7 @@ class Edge(dict, MutableMapping):
         # Replace the index with the matches index.
         s_keypoints.index = matches.index
         d_keypoints.index = matches.index
-        
+
         self['fundamental_matrix'], fmask = fm.compute_fundamental_matrix(s_keypoints, d_keypoints, **kwargs)
 
         if isinstance(self['fundamental_matrix'], np.ndarray):
@@ -344,9 +344,9 @@ class Edge(dict, MutableMapping):
             if 0 in s_template.shape or 0 in d_search.shape:
                 continue
             try:
-                (x_offset, y_offset, strength),ref = sp.subpixel_offset(s_template, d_search, **kwargs)
+                (x_offset, y_offset, strength) = sp.subpixel_offset(s_template, d_search, **kwargs)
                 self.subpixel_matches.loc[idx, ('x_offset', 'y_offset', 'correlation', 'reference')]= [x_offset, y_offset, strength, source_image]
-                pts.append([s_template, d_search, ref, x_offset, y_offset])
+                pts.append([s_template, d_search, source_image, x_offset, y_offset])
             except:
                 warnings.warn('Template-Search size mismatch, failing for this correspondence point.')
 

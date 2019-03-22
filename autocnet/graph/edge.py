@@ -87,7 +87,7 @@ class Edge(dict, MutableMapping):
         if not hasattr(self, '_matches'):
             self._matches = pd.DataFrame()
         return self._matches
-    
+
     @matches.setter
     def matches(self, value):
         if isinstance(value, pd.DataFrame):
@@ -97,7 +97,7 @@ class Edge(dict, MutableMapping):
                 self.costs = pd.DataFrame(index=value.index)
         else:
             raise(TypeError)
-    
+
     @property
     def costs(self):
         if not hasattr(self, '_costs'):
@@ -185,11 +185,11 @@ class Edge(dict, MutableMapping):
         matches[:,2] = self.destination['node_id']
         matches[:,3] = tar_kps.index[pidx[:,1]].values
 
-        matches = pd.DataFrame(matches, columns=['source',
+        matches = pd.DataFrame(matches, columns=['source_image',
                                                  'source_idx',
-                                                 'destination',
+                                                 'destination_image',
                                                  'destination_idx']).astype(np.float32)
-        
+
         matches = matches.drop_duplicates()
 
         self.matches = matches
@@ -208,7 +208,7 @@ class Edge(dict, MutableMapping):
         dkps.reindex(self.matches['destination_idx'])
         self.matches['destination_x'] = dkps.values[:,0]
         self.matches['destination_y'] = dkps.values[:,1]
-        
+
     def project_matches(self, semimajor, semiminor, on='source', srid=None):
         """
         Project matches.
@@ -224,9 +224,9 @@ class Edge(dict, MutableMapping):
         if camera is None:
             warnings.warn('Unable to project matches without a sensor model.')
             return
-        
+
         matches = self.matches
-        
+
         gnd = np.empty((len(coords), 3))
         # Project the points to the surface and reproject into latlon space
         for i in range(gnd.shape[0]):
@@ -242,7 +242,7 @@ class Edge(dict, MutableMapping):
                                                                      coord[1],
                                                                      coord[2]))
             matches['geom'] = geoms
-        
+
         matches['lat'] = lat
         matches['lon'] = lon
         self.matches = matches
@@ -315,7 +315,7 @@ class Edge(dict, MutableMapping):
         node = node.lower()
         node = getattr(self, node)
         return self.get_keypoints(node, index=index, homogeneous=homogeneous, overlap=overlap)
-   
+
     def compute_fundamental_matrix(self, clean_keys=[], maskname='fundamental', **kwargs):
         """
         Estimate the fundamental matrix (F) using the correspondences tagged to this
@@ -339,7 +339,7 @@ class Edge(dict, MutableMapping):
         _, mask = self.clean(clean_keys)
         s_keypoints, d_keypoints = self.get_match_coordinates(clean_keys=clean_keys)
         self.fundamental_matrix, fmask = fm.compute_fundamental_matrix(s_keypoints, d_keypoints, **kwargs)
-        
+
 
         if isinstance(self.fundamental_matrix, np.ndarray):
             # Convert the truncated RANSAC mask back into a full length mask
@@ -428,7 +428,7 @@ class Edge(dict, MutableMapping):
                      for subpixel accuracy
 
         template_size : int
-                        The size of the template in pixels, must be odd. If using phase, 
+                        The size of the template in pixels, must be odd. If using phase,
                         only the template size is used.
 
         search_size : int
@@ -464,7 +464,7 @@ class Edge(dict, MutableMapping):
                 s_keypoint = self.source.get_keypoint_coordinates([s_idx])
                 sx = s_keypoint.x
                 sy = s_keypoint.y
-    
+
             if 'destination_x' in row.index:
                 dx = row.destination_x
                 dy = row.destination_y
@@ -481,7 +481,7 @@ class Edge(dict, MutableMapping):
                     strengths[i] = res[2]
             elif method == 'template':
                 new_x[i], new_y[i], strengths[i] = sp.subpixel_template(sx, sy, dx, dy, s_img, d_img,
-                                                                     search_size=search_size, 
+                                                                     search_size=search_size,
                                                                      template_size=template_size, **kwargs)
 
             # Capture the shifts
@@ -498,7 +498,7 @@ class Edge(dict, MutableMapping):
             self.costs.loc[mask, 'rmse'] = strengths[:,1]
         elif method == 'template':
             self.costs.loc[mask, 'correlation'] = strengths[:,0]
- 
+
 
     def suppress(self, suppression_func=spf.correlation, clean_keys=[], maskname='suppression', **kwargs):
         """

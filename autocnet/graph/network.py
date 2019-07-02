@@ -1539,6 +1539,8 @@ WHERE points.active = True AND measures.active=TRUE AND measures.jigreject=FALSE
         else:
             warning.warn('Unable to parse the passed filelist')
 
+        cls.clear_db()
+
         for f in filelist:
             # Create the nodes in the graph. Really, this is creating the
             # images in the DB
@@ -1607,7 +1609,8 @@ AND i1.id < i2.id""".format(query_string)
 
         return obj
 
-    def clear_db(self, tables=None):
+    @staticmethod
+    def clear_db(tables=None):
         """
         Truncate all of the database tables and reset any
         autoincrement columns to start with 1.

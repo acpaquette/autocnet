@@ -7,12 +7,15 @@ import shapely
 import sqlalchemy
 from plio.io.io_gdal import GeoDataset
 
-from autocnet import config, Session, engine
+from autocnet import config, dem
 from autocnet.cg import cg as compgeom
 from autocnet.io.db.model import Images, Measures, Overlay, Points
 from autocnet.matcher.subpixel import iterative_phase
+from autocnet.spatial import isis
+
 from plurmy import Slurm
 import csmapi
+
 
 # SQL query to decompose pairwise overlaps
 compute_overlaps_sql = """
@@ -46,8 +49,11 @@ def place_points_in_overlaps(nodes, size_threshold=0.0007,
 
     Parameters
     ----------
-    cg : CandiateGraph object
-         that is used to access sensor information
+    nodes : dict-link
+            A dict like object with a shared key with the intersection
+            field of the database Overlay table and a cg node object
+            as the value. This could be a NetworkCandidateGraph or some
+            other dict-like object.
 
     size_threshold : float
                      overlaps with area <= this threshold are ignored
@@ -55,37 +61,23 @@ def place_points_in_overlaps(nodes, size_threshold=0.0007,
     iterative_phase_kwargs : dict
         Dictionary of keyword arguments for the iterative phase matcher function
     """
-    if not Session:
-        warnings.warn('This function requires a database connection configured via an autocnet config file.')
-        return
-
     points = []
-    session = Session()
-    if 'dem' in config['spatial']:
-        dem = config['spatial']['dem']
-        gd = GeoDataset(dem)
-    else:
-        gd = None
-
-    # TODO: This should be a passable query where we can subset.
-    for o in session.query(Overlay).\
-             filter(sqlalchemy.func.ST_Area(Overlay.geom) >= size_threshold).\
-             filter(sqlalchemy.func.array_length(Overlay.intersections, 1) > 1):
+    for o in Overlay.overlapping_larger_than(size_threshold):
         overlaps = o.intersections
         if overlaps == None:
             continue
-            
+
         overlapnodes = [nodes[id] for id in overlaps]
         points.extend(place_points_in_overlap(overlapnodes, o.geom, dem=dem, cam_type=cam_type,
                                               iterative_phase_kwargs=iterative_phase_kwargs,
                                               distribute_points_kwargs=distribute_points_kwargs))
 
-    session.add_all(points)
-    session.commit()
+    Points.bulkadd(points)
 
 def cluster_place_points_in_overlaps(size_threshold=0.0007,
                                      iterative_phase_kwargs={'size':71},
-                                     walltime='00:10:00'):
+                                     distribute_points_kwargs={},
+                                     walltime='00:10:00', cam_type="csm"):
     """
     Place points in all of the overlap geometries by back-projecing using
     sensor models. This method uses the cluster to process all of the overlaps
@@ -103,17 +95,13 @@ def cluster_place_points_in_overlaps(size_threshold=0.0007,
 
     walltime : str
         Cluster job wall time as a string HH:MM:SS
-    """
-    if not Session:
-        warnings.warn('This function requires a database connection configured via an autocnet config file.')
-        return
 
+    cam_type : str
+               options: {"csm", "isis"}
+               Pick what kind of camera model implementation to use
+    """
     # Get all of the overlaps over the size threshold
-    session = Session()
-    overlaps = session.query(Overlay.id, Overlay.geom, Overlay.intersections).\
-                       filter(sqlalchemy.func.ST_Area(Overlay.geom) >= size_threshold).\
-                       filter(sqlalchemy.func.array_length(Overlay.intersections, 1) > 1)
-    session.close()
+    overlaps = Overlay.overlapping_larger_than(size_threshold)
 
     # Setup the redis queue
     rqueue = StrictRedis(host=config['redis']['host'],
@@ -125,7 +113,9 @@ def cluster_place_points_in_overlaps(size_threshold=0.0007,
     for overlap in overlaps:
         msg = {'id' : overlap.id,
                'iterative_phase_kwargs' : iterative_phase_kwargs,
-               'walltime' : walltime}
+               'distribute_points_kwargs' : distribute_points_kwargs,
+               'walltime' : walltime,
+               'cam_type': cam_type}
         rqueue.rpush(queuename, json.dumps(msg))
     job_counter = len([*overlaps]) + 1
 
@@ -138,15 +128,16 @@ def cluster_place_points_in_overlaps(size_threshold=0.0007,
     submitter.submit(array='1-{}'.format(job_counter))
     return job_counter
 
-def place_points_in_overlap(nodes, geom, dem=None,
-                            iterative_phase_kwargs={'size':71}):
+def place_points_in_overlap(nodes, geom, dem=dem, cam_type="csm",
+                            iterative_phase_kwargs={'size':71},
+                            distribute_points_kwargs={}):
     """
     Place points into an overlap geometry by back-projecing using sensor models.
 
     Parameters
     ----------
     nodes : list of Nodes
-        The CandidateGraph nodes of all the images that intersect the overlap
+        The Nodes or Networknodes of all the images that intersect the overlap
 
     geom : geometry
         The geometry of the overlap region
@@ -158,32 +149,37 @@ def place_points_in_overlap(nodes, geom, dem=None,
     iterative_phase_kwargs : dict
         Dictionary of keyword arguments for the iterative phase matcher function
 
+    cam_type : str
+               options: {"csm", "isis"}
+               Pick what kind of camera model implementation to use
+
     Returns
     -------
     points : list of Points
         The list of points seeded in the overlap
     """
+    avail_cams = {"isis", "csm"}
+    cam_type = cam_type.lower()
+    if cam_type not in cam_type:
+        raise Exception(f'{cam_type} is not one of valid camera: {avail_cams}')
+
     points = []
     semi_major = config['spatial']['semimajor_rad']
     semi_minor = config['spatial']['semiminor_rad']
     ecef = pyproj.Proj(proj='geocent', a=semi_major, b=semi_minor)
     lla = pyproj.Proj(proj='latlon', a=semi_major, b=semi_minor)
 
-    valid = compgeom.distribute_points_in_geom(geom)
+    valid = compgeom.distribute_points_in_geom(geom, **distribute_points_kwargs)
     if not valid:
-        raise ValueError('Failed to distribute points in overlap')
+        warnings.warn('Failed to distribute points in overlap')
+        return []
 
     # Grab the source image. This is just the node with the lowest ID, nothing smart.
     source = nodes[0]
     nodes.remove(source)
-    source_camera = source.camera
     for v in valid:
         lon = v[0]
         lat = v[1]
-        geom = shapely.geometry.Point(lon, lat)
-        point = Points(geom=geom,
-                       pointtype=2) # Would be 3 or 4 for ground
-
         # Calculate the height, the distance (in meters) above or
         # below the aeroid (meters above or below the BCBF spheroid).
         if dem is None:
@@ -191,22 +187,35 @@ def place_points_in_overlap(nodes, geom, dem=None,
         else:
             px, py = dem.latlon_to_pixel(lat, lon)
             height = dem.read_array(1, [px, py, 1, 1])[0][0]
-
         # Get the BCEF coordinate from the lon, lat
         x, y, z = pyproj.transform(lla, ecef, lon, lat, height)
-        gnd = csmapi.EcefCoord(x, y, z)
+        geom = shapely.geometry.Point(x, y, z)
+        point = Points(apriori=geom,
+                       adjusted=geom,
+                       pointtype=2) # Would be 3 or 4 for ground
 
-        sic = source_camera.groundToImage(gnd)
-        point.measures.append(Measures(sample=sic.samp,
-                                       line=sic.line,
+        if cam_type == "csm":
+            gnd = csmapi.EcefCoord(x, y, z)
+            sic = source.camera.groundToImage(gnd)
+            ssample, sline = sic.samp, sic.line
+        if cam_type == "isis":
+            sline, ssample = isis.ground_to_image(source["image_path"], lat ,lon)
+
+        point.measures.append(Measures(sample=ssample,
+                                       line=sline,
                                        imageid=source['node_id'],
                                        serial=source.isis_serial,
                                        measuretype=3))
 
 
         for i, dest in enumerate(nodes):
-            dic = dest.camera.groundToImage(gnd)
-            dx, dy, _ = iterative_phase(sic.samp, sic.line, dic.samp, dic.line,
+            if cam_type == "csm":
+                dic = dest.camera.groundToImage(gnd)
+                dline, dsample = dic.line, dic.samp
+            if cam_type == "isis":
+                dline, dsample = isis.ground_to_image(dest["image_path"], lat, lon)
+
+            dx, dy, _ = iterative_phase(ssample, sline, dsample, dline,
                                         source.geodata, dest.geodata,
                                         **iterative_phase_kwargs)
             if dx is not None or dy is not None:

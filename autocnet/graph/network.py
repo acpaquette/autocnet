@@ -17,6 +17,9 @@ import shapely.geometry
 import shapely.wkt as swkt
 import shapely.ops
 
+import pyproj
+
+from plio.io.io_controlnetwork import from_isis
 from plio.io import io_hdf, io_json
 from plio.utils import utils as io_utils
 from plio.io.io_gdal import GeoDataset
@@ -31,9 +34,8 @@ from autocnet.graph import markov_cluster
 from autocnet.graph.edge import Edge, NetworkEdge
 from autocnet.graph.node import Node, NetworkNode
 from autocnet.io import network as io_network
-from autocnet.io.db.model import (Images, Keypoints, Matches, Cameras,
-                                  Base, Overlay, Edges, Costs,
-                                  Points, Measures)
+from autocnet.io.db.model import (Images, Keypoints, Matches, Cameras, Points,
+                                  Base, Overlay, Edges, Costs, Measures)
 from autocnet.io.db.connection import new_connection, Parent
 from autocnet.vis.graph_view import plot_graph, cluster_plot
 from autocnet.control import control
@@ -451,9 +453,9 @@ class CandidateGraph(nx.Graph):
                 of nodes to load features for.  If empty, load features
                 for all nodes
         """
-        self.apply(Nodes.load_features, args=(in_path, nfeatures), on='node', **kwargs)
+        self.apply(Node.load_features, args=(in_path, nfeatures), on='node', **kwargs)
         for n in self.nodes:
-            if node['node_id'] not in nodes:
+            if n['node_id'] not in nodes:
                 continue
             else:
                 n.load_features(in_path, **kwargs)
@@ -1298,9 +1300,6 @@ class NetworkCandidateGraph(CandidateGraph):
         for s, d, e in self.edges(data='data'):
             e.parent = self
 
-        # Execute the computation to compute overlapping geometries
-        self._execute_sql(compute_overlaps_sql)
-
         # Setup the redis queues
         redis = config.get('redis')
         if redis:
@@ -1537,7 +1536,7 @@ WHERE points.active = True AND measures.active=TRUE AND measures.jigreject=FALSE
         elif os.path.exists(filelist):
             filelist = io_utils.file_to_list(filelist)
         else:
-            warning.warn('Unable to parse the passed filelist')
+            warnings.warn('Unable to parse the passed filelist')
 
         cls.clear_db()
 
@@ -1547,7 +1546,11 @@ WHERE points.active = True AND measures.active=TRUE AND measures.jigreject=FALSE
             image_name = os.path.basename(f)
             NetworkNode(image_path=f, image_name=image_name)
 
-        return cls.from_database()
+        obj = cls.from_database()
+        # Execute the computation to compute overlapping geometries
+        obj._execute_sql(compute_overlaps_sql)
+
+        return obj
 
     @classmethod
     def from_database(cls, query_string='SELECT * FROM public.images'):
@@ -1573,23 +1576,21 @@ WHERE points.active = True AND measures.active=TRUE AND measures.jigreject=FALSE
         intersect the user provided polygon (the LINESTRING) in the given spatial reference system
         (SRID), 949900.
 
-        "SELECT * FROM Images WHERE ST_INTERSECTS(footprint_latlon, ST_Polygon(ST_GeomFromText('LINESTRING(159 10, 159 11, 160 11, 160 10, 159 10)'),949900)) = TRUE"
-from_database
+        SELECT * FROM Images WHERE ST_INTERSECTS(footprint_latlon, ST_Polygon(ST_GeomFromText('LINESTRING(159 10, 159 11, 160 11, 160 10, 159 10)'),949900)) = TRUE
+
         ## Select from a specific orbit
         This example selects those images that are from a particular orbit. In this case,
         the regex string pulls all P##_* orbits and creates a graph from them. This method
         does not guarantee that the graph is fully connected.
 
-        "SELECT * FROM Images WHERE (split_part(path, '/', 6) ~ 'P[0-9]+_.+') = True"
-
+        SELECT * FROM Images WHERE (split_part(path, '/', 6) ~ 'P[0-9]+_.+') = True
         """
-        composite_query = """WITH
-	i as ({})
-SELECT i1.id as i1_id,i1.path as i1_path, i2.id as i2_id, i2.path as i2_path
-FROM
-	i as i1, i as i2
-WHERE ST_INTERSECTS(i1.footprint_latlon, i2.footprint_latlon) = TRUE
-AND i1.id < i2.id""".format(query_string)
+
+        composite_query = '''WITH i as ({}) SELECT i1.id
+        as i1_id,i1.path as i1_path, i2.id as i2_id, i2.path as i2_path
+        FROM i  as i1, i as i2
+        WHERE ST_INTERSECTS(i1.footprint_latlon, i2.footprint_latlon) = TRUE
+        AND i1.id < i2.id'''.format(query_string)
 
         session = Session()
         res = session.execute(composite_query)
@@ -1627,7 +1628,7 @@ AND i1.id < i2.id""".format(query_string)
                 tables = [tables]
         else:
             tables = engine.table_names()
-        
+
         for t in tables:
             session.execute(f'TRUNCATE TABLE {t} CASCADE')
             try:
@@ -1638,6 +1639,74 @@ AND i1.id < i2.id""".format(query_string)
         session.close()
 
 
+    def place_points_from_cnet(self, cnet):
+        semi_major, semi_minor = config["spatial"]["semimajor_rad"], config["spatial"]["semiminor_rad"]
+        ecef = pyproj.Proj(proj='geocent', a=semi_major, b=semi_minor)
+        lla = pyproj.Proj(proj='latlon', a=semi_major, b=semi_minor)
 
+        if isinstance(cnet, str):
+            cnet = from_isis(cnet)
 
-            
+        # rename some columns
+        newcols = []
+        for i, c in enumerate(cnet.columns):
+            if i == 1:
+                newcols.append('pointtype')
+            elif i == 5:
+                newcols.append('pointignore')
+            elif i == 6:
+                newcols.append('pointjigsawRejected')
+            elif i == 25:
+                newcols.append('measuretype')
+            else:
+                newcols.append(c)
+        cnet.columns = newcols
+
+        cnetpoints = cnet.groupby('id')
+        points = []
+        session = Session()
+
+        for id, cnetpoint in cnetpoints:
+            def get_measures(row):
+                res = session.query(Images).filter(Images.serial == row.serialnumber).one()
+                return Measures(pointid=id,
+                         imageid=int(res.id), # Need to grab this
+                         measuretype=int(row.measuretype),
+                         serial=row.serialnumber,
+                         sample=float(row['sample']),
+                         line=float(row['line']),
+                         sampler=float(row.sampleResidual),
+                         liner=float(row.lineResidual),
+                         active=not row.ignore, # active = ~ignored
+                         jigreject=row.jigsawRejected,
+                         aprioriline=float(row.aprioriline),
+                         apriorisample=float(row.apriorisample),
+                         linesigma=float(row.linesigma),
+                         samplesigma=float(row.samplesigma))
+
+            measures = cnetpoint.apply(get_measures, axis=1)
+
+            row = cnetpoint.iloc[0]
+            x,y,z= row.adjustedX, row.adjustedY, row.adjustedZ
+            lon, lat, alt = pyproj.transform(ecef, lla, x, y, z)
+
+            point = Points(identifier=id,
+                           active=not row.pointignore, # active = ~ignored
+                           apriori= shapely.geometry.Point(float(row.aprioriX), float(row.aprioriY), float(row.aprioriZ)),
+                           adjusted= shapely.geometry.Point(float(row.adjustedX),float(row.adjustedY),float(row.adjustedZ)),
+                           pointtype=float(row.pointtype))
+
+            point.measures = list(measures)
+            points.append(point)
+        session.add_all(points)
+        session.commit()
+        session.close()
+
+    @classmethod
+    def from_cnet(cls, cnet, filelist):
+        """
+
+        """
+        networkobj = cls.from_filelist(filelist)
+        networkobj.place_points_from_cnet(cnet)
+        return networkobj

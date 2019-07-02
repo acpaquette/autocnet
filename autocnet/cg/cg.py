@@ -1,3 +1,4 @@
+from math import isclose
 import warnings
 
 import pandas as pd
@@ -54,7 +55,7 @@ def convex_hull(points):
     """
 
     if isinstance(points, pd.DataFrame) :
-        points = pd.DataFrame.as_matrix(points)
+        points = pd.DataFrame(points).values
 
     hull = ConvexHull(points)
     return hull
@@ -202,26 +203,25 @@ def compute_voronoi(keypoints, intersection=None, geometry=False, s=30): # ADDED
 def single_centroid(geom):
     """
     For a geom, return the centroid
-    
+
     Parameters
     ----------
     geom : shapely.geom object
-    
+
     Returns
     -------
-    
-    valid : list
+
+     : list
             in the form [(x,y)]
     """
     x, y = geom.centroid.xy
-    valid = [(x[0],y[0])]
-    return valid
+    return [(x[0],y[0])]
 
 def nearest(pt, search):
     """
     Fine the index of nearest (Euclidean) point in a list
     of points.
-    
+
     Parameters
     ----------
     pt : ndarray
@@ -230,34 +230,79 @@ def nearest(pt, search):
              (n,2) array of points to search within. The
              returned index is the closet point in this set
              to the search
-             
-    Returns 
+
+    Returns
     -------
      : int
        The index to the nearest point.
     """
     return np.argmin(np.sum((search - pt)**2, axis=1))
 
+def create_points_along_line(p1, p2, npts):
+    """
+    Compute a set of nodes equally spaced between
+    two points, not including the end points.
+
+    Parameters
+    ----------
+    p1 : iterable
+         in the form (x,y)
+
+    p2 : iterable
+         in the form(x,y)
+
+    npts : int
+           The number of nodes to be returned
+
+    Returns
+    -------
+     : ndarray
+       (n,2) array of nodes
+    """
+    # npts +2 since the endpoints are included in linspace
+    # but this func clips them
+    return np.linspace(p1, p2, npts+2)[1:-1]
+
+def xy_in_polygon(x,y, geom):
+    """
+    Returns true is an x,y pair is contained within
+    the geom.
+
+    Parameters
+    ----------
+    x : Number
+        The x coordinate
+
+    y : Number
+        The y coordinate
+
+    Returns
+    -------
+     : bool
+       True if the point is contained within the geom.
+    """
+    return geom.contains(Point(x, y))
+
 def distribute_points(geom, nspts, ewpts):
     """
-    This is a decision tree that attempts to perform a 
-    very simplistic approximation of the shape 
+    This is a decision tree that attempts to perform a
+    very simplistic approximation of the shape
     of the geometry and then place some number of
     north/south and east/west points into the geometry.
-    
+
     Parameters
     ----------
     geom : shapely.geom
            A shapely geometry object
-        
+
     nspts : int
             The number of points to attempt to place
             in the N/S (up/down) direction
-            
+
     ewpts : int
             The number of points to attempt to place
             in the E/W (right/left) direction
-            
+
     Returns
     -------
     valid : list
@@ -271,48 +316,36 @@ def distribute_points(geom, nspts, ewpts):
     lr = coords[1]
     ur = coords[2]
     ul = coords[3]
-        
+
     # Find the points nearest the ul and ur
     ul_actual = geom_coords[nearest(ul, geom_coords)]
     ur_actual = geom_coords[nearest(ur, geom_coords)]
-    dist = np.sqrt((ul_actual[1] - ur_actual[1])**2 + (ul_actual[0] - ur_actual[0])**2)
-    m = (ul_actual[1]-ur_actual[1])/(ul_actual[0]-ur_actual[0])
-    b = (ul_actual[1] - ul_actual[0] * m)
-    newtop = []
-    xnodes = np.linspace(ul_actual[0], ur_actual[0], num=ewpts+2)
-    for x in xnodes[1:-1]:
-        newtop.append((x, m*x+b))
+    newtop = create_points_along_line(ul_actual, ur_actual, ewpts)
 
-    # Find the points nearest the ll and lr 
-
+    # Find the points nearest the ll and lr
     ll_actual = geom_coords[nearest(ll, geom_coords)]
     lr_actual = geom_coords[nearest(lr, geom_coords)]
-    dist = np.sqrt((ll_actual[1] - lr_actual[1])**2 + (ll_actual[0] - lr_actual[0])**2)
-    m = (ll_actual[1]- lr_actual[1])/(ll_actual[0]-lr_actual[0])
-    b = (ll_actual[1] - ll_actual[0] * m)
-    newbot = []
-    xnodes = np.linspace(ll_actual[0], lr_actual[0], num=ewpts+2)
-    for x in xnodes[1:-1]:
-        newbot.append((x, m*x+b))
-    newpts = []
+    newbot = create_points_along_line(ll_actual, lr_actual, ewpts)
+
+    points = []
     for i in range(len(newtop)):
         top = newtop[i]
         bot = newbot[i]
-        # Compute the line between top and bottom
-        m = (top[1] - bot[1]) / (top[0] - bot[0])
-        b = (top[1] - top[0] * m)
-        xnodes = np.linspace(bot[0], top[0], nspts+2)
-        for x in xnodes[1:-1]:
-            newpts.append((x, m*x+b))
-    valid = []
+
+        line_of_points = create_points_along_line(top, bot, nspts)
+        points.append(line_of_points)
+
+    if len(points) < 1:
+        return []
+
+    points = np.vstack(points)
     # Perform a spatial intersection check to eject points that are not valid
-    for p in newpts:
-        pt = Point(p[0], p[1])
-        if geom.contains(pt):
-            valid.append(p)
+    valid = [p for p in points if xy_in_polygon(p[0], p[1], geom)]
     return valid
 
-def distribute_points_in_geom(geom):
+def distribute_points_in_geom(geom,
+                              nspts_func=lambda x: int(round(x,1)*10),
+                              ewpts_func=lambda x: int(round(x,1)*5)):
     """
     Given a geometry, attempt a basic classification of the shape.
     RIght now, this simply attempts to determine if the bounding box
@@ -320,10 +353,25 @@ def distribute_points_in_geom(geom):
     is made, the algorithm places points in the geometry and returns
     a list of valid (intersecting) points.
 
+    The kwargs for this algorithm take a function that expects a number
+    as an input and returns an integer number of points to place. The
+    input number is the distance between the top/bottom or left/right
+    sides of the geometry.
+
+    This algorithm does not know anything about the units being used
+    so the caller is responsible for acocunting for units (if appropriate)
+    in the passed funcs.
+
     Parameters
     ----------
     geom : shapely.geom object
            The geometry object
+
+    nspts_func : obj
+                 Function taking a Number and returning an int
+
+    ewpts_func : obj
+                 Function taking a Number and returning an int
 
     Returns
     -------
@@ -333,7 +381,7 @@ def distribute_points_in_geom(geom):
     """
     coords = list(zip(*geom.envelope.exterior.xy))
     short = np.inf
-    long = -np.inf
+    lng = -np.inf
     shortid = 0
     longid = 0
     for i, p in enumerate(coords[:-1]):
@@ -341,21 +389,20 @@ def distribute_points_in_geom(geom):
         if d < short:
             short = d
             shortid = i
-        if d > long:
-            long = d
+        if d > lng:
+            lng = d
             longid = i
-    ratio = short/long
+    ratio = short/lng
     ns = False
     ew = False
     valid = []
-
     # The polygons should be encoded with a lower left origin in counter-clockwise direction.
     # Therefore, if the 'bottom' is the short edge it should be id 0 and modulo 2 == 0.
     if shortid % 2 == 0:
+        # Also if the geom is a perfect square
         ns = True
     elif longid % 2 == 0:
         ew = True
-
     # Decision Tree
     if ratio < 0.16 and geom.area < 0.01:
         # Class: Slivers - ignore.
@@ -365,20 +412,16 @@ def distribute_points_in_geom(geom):
         valid = single_centroid(geom)
     elif ns==True:
         # Class, north/south poly, multi-point
-        nspts = int(round(long, 1) * 10)
-        if nspts >= 5:
-            nspts = int(nspts/(nspts/3))
-        ewpts = max(int(round(short, 1) * 5), 1)
+        nspts = nspts_func(lng)
+        ewpts = ewpts_func(short)
         if nspts == 1 and ewpts == 1:
             valid = single_centroid(geom)
         else:
             valid = distribute_points(geom, nspts, ewpts)
     elif ew == True:
         # Since this is an LS, we should place these diagonally from the 'lower left' to the 'upper right'
-        nspts = max(int(round(short, 1) * 5), 1)
-        if nspts >= 5:
-            nspts = int(nspts/(npts/3))
-        ewpts = int(round(long, 1) * 10)
+        nspts = ewpts_func(short)
+        ewpts = nspts_func(lng)
         if nspts == 1 and ewpts == 1:
             valid = single_centroid(geom)
         else:

@@ -8,7 +8,6 @@ import sys
 from redis import StrictRedis
 import yaml
 
-from autocnet.io.db import connection
 from autocnet.io.db.redis_queue import pop_computetime_push, finalize
 from autocnet.graph.node import NetworkNode
 from autocnet.graph.edge import NetworkEdge
@@ -16,7 +15,7 @@ from autocnet.graph.edge import NetworkEdge
 #Load the config file
 try:
     with open(os.environ['autocnet_config'], 'r') as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
 except:
     print("The 'autocnet_config' environment variable is not set.")
     sys.exit()
@@ -63,7 +62,7 @@ if __name__ == '__main__':
     #remove_key = copy.deepcopy(msg)
     
     # Pseudo-mock graph parent; used for the DB session only
-
+    
     # Apply the algorithm
     response = main(msg, config)
 

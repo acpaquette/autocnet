@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 
+import sqlalchemy
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (Column, String, Integer, Float, \
                         ForeignKey, Boolean, LargeBinary, \
@@ -24,8 +25,9 @@ from autocnet import engine, Session, config
 Base = declarative_base()
 
 # Default to mars if no config is set
-spatial = config.get('spatial', {'srid': 949900})
-srid = spatial['srid']
+spatial = config.get('spatial', {'latitudinal_srid': 949900, 'rectangular_srid': 949980})
+latitudinal_srid = spatial['latitudinal_srid']
+rectangular_srid = spatial['rectangular_srid']
 
 class BaseMixin(object):
     @classmethod
@@ -34,6 +36,13 @@ class BaseMixin(object):
         session.add(obj)
         session.commit()
         return obj
+
+    @staticmethod
+    def bulkadd(iterable):
+        session = Session()
+        session.add_all(iterable)
+        session.commit()
+        session.close()
 
 class JsonEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -115,7 +124,7 @@ class Keypoints(BaseMixin, Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     image_id = Column(Integer, ForeignKey("images.id", ondelete="CASCADE"))
     convex_hull_image = Column(Geometry('POLYGON'))
-    convex_hull_latlon = Column(Geometry('POLYGON', srid=srid))
+    convex_hull_latlon = Column(Geometry('POLYGON', srid=latitudinal_srid))
     path = Column(String)
     nkeypoints = Column(Integer)
 
@@ -158,7 +167,7 @@ class Matches(BaseMixin, Base):
     destination_idx = Column(Integer, nullable=False)
     lat = Column(Float)
     lon = Column(Float)
-    _geom = Column("geom", Geometry('POINT', dimension=2, srid=srid, spatial_index=True))
+    _geom = Column("geom", Geometry('POINT', dimension=2, srid=latitudinal_srid, spatial_index=True))
     source_x = Column(Float)
     source_y = Column(Float)
     destination_x = Column(Float)
@@ -178,7 +187,7 @@ class Matches(BaseMixin, Base):
     @geom.setter
     def geom(self, geom):
         if geom:  # Supports instances where geom is explicitly set to None.
-            self._geom = from_shape(geom, srid=srid)
+            self._geom = from_shape(geom, srid=latitudinal_srid)
 
 class Cameras(BaseMixin, Base):
     __tablename__ = 'cameras'
@@ -193,8 +202,8 @@ class Images(BaseMixin, Base):
     name = Column(String)
     path = Column(String)
     serial = Column(String, unique=True)
-    active = Column(Boolean)
-    _footprint_latlon = Column("footprint_latlon", Geometry('MultiPolygon', srid=srid, dimension=2, spatial_index=True))
+    active = Column(Boolean, default=True)
+    _footprint_latlon = Column("footprint_latlon", Geometry('MultiPolygon', srid=latitudinal_srid, dimension=2, spatial_index=True))
     footprint_bodyfixed = Column(Geometry('MULTIPOLYGON', dimension=2))
     #footprint_bodyfixed = Column(Geometry('POLYGON',dimension=3))
 
@@ -226,14 +235,17 @@ class Images(BaseMixin, Base):
         if isinstance(geom, osgeo.ogr.Geometry):
             # If an OGR geom, convert to shapely
             geom = shapely.wkt.loads(geom.ExportToWkt())
-        self._footprint_latlon = from_shape(geom, srid=srid)
+        if geom is None:
+            self._footprint_latlon = None
+        else:
+            self._footprint_latlon = from_shape(geom, srid=latitudinal_srid)
 
 class Overlay(BaseMixin, Base):
     __tablename__ = 'overlay'
     id = Column(Integer, primary_key=True, autoincrement=True)
     intersections = Column(ARRAY(Integer))
     #geom = Column(Geometry(geometry_type='POLYGON', management=True))  # sqlite
-    _geom = Column("geom", Geometry('POLYGON', srid=srid, dimension=2, spatial_index=True))  # postgresql
+    _geom = Column("geom", Geometry('POLYGON', srid=latitudinal_srid, dimension=2, spatial_index=True))  # postgresql
 
     @hybrid_property
     def geom(self):
@@ -243,7 +255,25 @@ class Overlay(BaseMixin, Base):
             return self._geom
     @geom.setter
     def geom(self, geom):
-        self._geom = from_shape(geom, srid=srid)
+        self._geom = from_shape(geom, srid=latitudinal_srid)
+
+    @classmethod
+    def overlapping_larger_than(cls, size_threshold):
+        """
+        Query the Overlay table for an iterable of responses where the objects
+        in the iterable have an area greater than a given size.
+
+        Parameters
+        ----------
+        size_threshold : Number
+                        area >= this arg are returned
+        """
+        session = Session()
+        res = session.query(cls).\
+                filter(sqlalchemy.func.ST_Area(cls.geom) >= size_threshold).\
+                filter(sqlalchemy.func.array_length(cls.intersections, 1) > 1)
+        session.close()
+        return res
 
 class PointType(enum.IntEnum):
     """
@@ -258,16 +288,11 @@ class Points(BaseMixin, Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     _pointtype = Column("pointtype", IntEnum(PointType), nullable=False)  # 2, 3, 4 - Could be an enum in the future, map str to int in a decorator
     identifier = Column(String, unique=True)
-    _geom = Column("geom", Geometry('POINT', srid=srid, dimension=2, spatial_index=True))
+    _geom = Column("geom", Geometry('POINT', srid=latitudinal_srid, dimension=2, spatial_index=True))
     active = Column(Boolean, default=True)
-    apriorix = Column(Float)
-    aprioriy = Column(Float)
-    aprioriz = Column(Float)
-    adjustedx = Column(Float)
-    adjustedy = Column(Float)
-    adjustedz = Column(Float)
+    _apriori = Column("apriori", Geometry('POINTZ', srid=rectangular_srid, dimension=3, spatial_index=False))
+    _adjusted = Column("adjusted", Geometry('POINTZ', srid=rectangular_srid, dimension=3, spatial_index=False))
     measures = relationship('Measures')
-    rms = Column(Float)
 
     @hybrid_property
     def geom(self):
@@ -278,8 +303,36 @@ class Points(BaseMixin, Base):
 
     @geom.setter
     def geom(self, geom):
-        if geom:
-            self._geom = from_shape(geom, srid=srid)
+        raise TypeError("The geom column for Points cannot be set." \
+                        " Set the adjusted column to update the geom.")
+
+    @hybrid_property
+    def apriori(self):
+        try:
+            return to_shape(self._apriori)
+        except:
+            return self._apriori
+
+    @apriori.setter
+    def apriori(self, apriori):
+        if apriori:
+            self._apriori = from_shape(apriori, srid=rectangular_srid)
+        else:
+            self._apriori = apriori
+
+    @hybrid_property
+    def adjusted(self):
+        try:
+            return to_shape(self._adjusted)
+        except:
+            return self._adjusted
+
+    @adjusted.setter
+    def adjusted(self, adjusted):
+        if adjusted:
+            self._adjusted = from_shape(adjusted, srid=rectangular_srid)
+        else:
+            self._adjusted = adjusted
 
     @hybrid_property
     def pointtype(self):
@@ -290,7 +343,7 @@ class Points(BaseMixin, Base):
         if isinstance(v, int):
             v = PointType(v)
         self._pointtype = v
-        
+
 class MeasureType(enum.IntEnum):
     """
     Enum to enforce measure type for ISIS control networks
@@ -330,7 +383,7 @@ class Measures(BaseMixin, Base):
         self._measuretype = v
 
 if Session:
-    from autocnet.io.db.triggers import valid_point_function, valid_point_trigger
+    from autocnet.io.db.triggers import valid_point_function, valid_point_trigger, update_point_function, update_point_trigger, valid_geom_function, valid_geom_trigger
     # Create the database
     if not database_exists(engine.url):
         create_database(engine.url, template='template_postgis')  # This is a hardcode to the local template
@@ -339,6 +392,10 @@ if Session:
         # based on the point count.
         event.listen(Base.metadata, 'before_create', valid_point_function)
         event.listen(Measures.__table__, 'after_create', valid_point_trigger)
+        event.listen(Base.metadata, 'before_create', update_point_function)
+        event.listen(Images.__table__, 'after_create', update_point_trigger)
+        event.listen(Base.metadata, 'before_create', valid_geom_function)
+        event.listen(Images.__table__, 'after_create', valid_geom_trigger)
 
     Base.metadata.bind = engine
     # If the table does not exist, this will create it. This is used in case a

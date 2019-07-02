@@ -9,17 +9,17 @@ from redis import StrictRedis
 import yaml
 
 from autocnet.io.db.redis_queue import pop_computetime_push, finalize
-from autocnet.io.db.model import Overlay, Images
+from autocnet.io.db.model import Overlay, Images, Points
 from autocnet.spatial.overlap import place_points_in_overlap
 from autocnet.graph.node import NetworkNode
-from autocnet import Session
+from autocnet import Session, dem
 
 from plio.io.io_gdal import GeoDataset
 
 #Load the config file
 try:
     with open(os.environ['autocnet_config'], 'r') as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
 except:
     print("The 'autocnet_config' environment variable is not set.")
     sys.exit(1)
@@ -37,17 +37,23 @@ def main(msg, config):
     for id in overlap.intersections:
         res = session.query(Images).filter(Images.id == id).first()
         nodes.append(NetworkNode(node_id=id, image_path=res.path))
-    if 'dem' in config['spatial']:
-        dem = config['spatial']['dem']
-        gd = GeoDataset(dem)
-    else:
-        gd = None
+    session.close()
+    
     print('Placing points in overlap', id)
-    points = place_points_in_overlap(nodes, overlap.geom, gd,
-                                     msg['iterative_phase_kwargs'])
+    points = place_points_in_overlap(nodes, overlap.geom, dem, msg["cam_type"],
+                                     msg['iterative_phase_kwargs'],
+                                     msg['distribute_points_kwargs'])
     session.add_all(points)
     session.commit()
     session.close()
+    
+    print('Placing points in overlap', id)
+    points = place_points_in_overlap(nodes, overlap.geom, dem, msg["cam_type"],
+                                     msg['iterative_phase_kwargs'],
+                                     msg['distribute_points_kwargs'])
+    
+    print('Adding {} points to the database.'.format(len(points)))
+    Points.bulkadd(points)
 
 if __name__ == '__main__':
     conf = config['redis']

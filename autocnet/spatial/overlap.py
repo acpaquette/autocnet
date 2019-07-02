@@ -35,8 +35,9 @@ INSERT INTO overlay(intersections, geom) SELECT row.intersections, row.geom FROM
   FROM iid GROUP BY iid.geom) AS row WHERE array_length(intersections, 1) > 1;
 """
 
-def place_points_in_overlaps(cg, size_threshold=0.0007,
-                             iterative_phase_kwargs={'size':71}):
+def place_points_in_overlaps(nodes, size_threshold=0.0007,
+                             iterative_phase_kwargs={'size':71},
+                             distribute_points_kwargs={}, cam_type='csm'):
     """
     Place points in all of the overlap geometries by back-projecing using
     sensor models.
@@ -73,9 +74,11 @@ def place_points_in_overlaps(cg, size_threshold=0.0007,
         overlaps = o.intersections
         if overlaps == None:
             continue
-        nodes = [cg.node[id] for id in overlaps]
-        points.extend(place_points_in_overlap(nodes, o.geom, dem=gd,
-                                              iterative_phase_kwargs=iterative_phase_kwargs))
+            
+        overlapnodes = [nodes[id] for id in overlaps]
+        points.extend(place_points_in_overlap(overlapnodes, o.geom, dem=dem, cam_type=cam_type,
+                                              iterative_phase_kwargs=iterative_phase_kwargs,
+                                              distribute_points_kwargs=distribute_points_kwargs))
 
     session.add_all(points)
     session.commit()
@@ -180,7 +183,7 @@ def place_points_in_overlap(nodes, geom, dem=None,
         geom = shapely.geometry.Point(lon, lat)
         point = Points(geom=geom,
                        pointtype=2) # Would be 3 or 4 for ground
-        
+
         # Calculate the height, the distance (in meters) above or
         # below the aeroid (meters above or below the BCBF spheroid).
         if dem is None:

@@ -82,4 +82,5 @@ def test_place_points_in_overlaps(overlapper, dem, adder,iterativekwargs, distri
                                 Polygon([(0,0),(0,5),(5,5),(5,0),(0,0)]),
                                 dem=None,
                                 iterative_phase_kwargs=iterativekwargs,
-                                distribute_points_kwargs=distributekwargs)
+                                distribute_points_kwargs=distributekwargs,
+                                cam_type='csm')

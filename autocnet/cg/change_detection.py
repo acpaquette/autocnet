@@ -2,8 +2,6 @@ import numpy as np
 
 import matplotlib
 from matplotlib.path import Path
-from matplotlib import pyplot as plt
-
 import cv2
 
 from sklearn.cluster import  OPTICS

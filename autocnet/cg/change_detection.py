@@ -909,3 +909,62 @@ def generate_boulder_field(dem, num_boulders, x_shift_min = 5, x_shift_max = 10,
             after_polys.append(after_geom)
 
     return before_dem, before_polys, after_dem, after_polys
+
+def create_affine(x_scale, y_scale, x_shift, y_shift, rotation,
+                  x_scale_delta, y_scale_delta, x_shift_delta, y_shift_delta, rotation_delta):
+
+    """
+    Generate an initial affine transformation matrix and generate a second
+    transformation matrix based on deltas applied to the initial affine matrix
+
+    x_scale : float
+              Value to scale the image by in the x direction. Where 1 is no scale,
+              > 1 is scaled up and < 1 is scaled down
+
+    y_scale : float
+              Value to scale the image by in the y direction. Where 1 is no scale,
+              > 1 is scaled up and < 1 is scaled down
+
+    x_shift : int
+              Number of pixels to shift the image in the x direction
+
+    y_shift : int
+              Number of pixels to shift the image in the y direction
+
+    rotation : float
+               Degress of rotation in the initial affine transformation
+
+    x_scale_delta : float
+                    Delta to apply to the initial x_scale
+
+    y_scale_delta : float
+                    Delta to apply to the initial y_scale
+
+    x_shift_delta : int
+                    Pixel shift delta to apply to the initial x_shift
+
+    y_shift_delta : int
+                    Pixel shift delta to apply to the initial y_shift
+
+    rotation_delta : float
+                     Degree delta to apply to the initial rotation
+    """
+    cos_theta = math.cos(rotation)
+    sin_theta = math.sin(rotation)
+    scale_affine = [[x_scale, 0, 0], [0, y_scale, 0], [0, 0, 1]]
+    shift_affine = [[1, 0, x_shift], [0, 1, y_shift], [0, 0, 1]]
+    rotation_affine = [[cos_theta, sin_theta, 0], [-sin_theta, cos_theta, 0], [0, 0, 1]]
+
+    before_affine = np.dot(scale_affine, shift_affine)
+    before_affine = np.dot(before_affine, rotation_affine)
+
+    cos_theta = math.cos(rotation + rotation_delta)
+    sin_theta = math.sin(rotation + rotation_delta)
+    scale_affine = [[x_scale + x_scale_delta, 0, 0], [0, y_scale + y_scale_delta, 0], [0, 0, 1]]
+    shift_affine = [[1, 0, x_shift + x_shift_delta], [0, 1, y_shift + y_shift_delta], [0, 0, 1]]
+    rotation_affine = [[cos_theta, sin_theta, 0], [-sin_theta, cos_theta, 0], [0, 0, 1]]
+
+    after_affine = np.dot(scale_affine, shift_affine)
+    after_affine = np.dot(after_affine, rotation_affine)
+
+    return before_affine, after_affine

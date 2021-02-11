@@ -751,21 +751,13 @@ def hillshade(img, azi=255, alt=60, min_slope=20, max_slope=100, min_bright=0, g
     bright = ((dprod - min_dprod) + min_bright)/((max_dprod - min_dprod) + min_bright)
 
     if grayscale:
-        qq=(255*bright)
+        arrforout = 255*bright
     else:
         qq = red_vec[zz]*bright
-
-    if grayscale:
-        rr = (255*bright)
-    else:
         rr = green_vec[zz]*bright
-
-    if grayscale:
-        ss=(255*bright)
-    else:
         ss = blue_vec[zz]*bright
+        arrforout = np.dstack((qq, rr ,ss))
 
-    arrforout = np.dstack((qq, rr ,ss))
     arrforout = np.flip(arrforout.astype(int), axis = 0)
     arrfotout = bytescale(arrforout)
     arrforout.shape
@@ -819,13 +811,13 @@ def generate_boulder(dem, radius, height=None, x=None, y=None):
         base_height = dem[x][y]
     else:
         base_height = height
-    for x_coord in range(len(dem[0])):
-        for y_coord in range(len(dem)):
+    for x_coord in range(dem.shape[1]):
+        for y_coord in range(dem.shape[0]):
             point_radius = math.sqrt(math.pow(x_coord - x, 2) + math.pow(y_coord - y, 2))
             if point_radius < radius:
                 computed_height = ((1 - (math.sin(((math.pi*point_radius)/(2*radius)))) * radius) + radius) + base_height
                 if computed_height >= dem[x_coord][y_coord]:
-                    points.append((y_coord, abs(len(dem[0]) - x_coord)))
+                    points.append((x_coord, y_coord))
                     new_dem[x_coord][y_coord] = computed_height
 
     if len(points) >= 3:
